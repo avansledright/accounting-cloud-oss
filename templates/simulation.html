@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+
+{% block sidebar_filter %}
+    <div class="sidebar-filter">
+        <div class="sidebar-filter-label">Account</div>
+        <select onchange="changeSimAccount(this.value)">
+            <option value="all" {{ 'selected' if account_filter == 'all' else '' }}>All Accounts</option>
+            {% for acc in accounts_for_filter %}
+            <option value="{{ acc.id }}" {{ 'selected' if account_filter == acc.id else '' }}>
+                {{ acc.name }}{% if acc.is_primary %} (Primary){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <h1>Budget Simulator</h1>
+    <p class="sim-intro">
+        Try out "what-if" changes &mdash; bump a bill up or down, give yourself a raise,
+        switch off a bill, or add a brand-new expense &mdash; and watch how the projected ledger
+        responds. This is a sandbox: <strong>nothing here changes your real data.</strong>
+    </p>
+
+    <form method="GET" action="{{ url_for('simulation_page') }}" id="sim-form">
+        <input type="hidden" name="account" value="{{ account_filter }}">
+
+        <div class="sim-controls">
+            <div class="transfer-header" id="sim-toggle">
+                <h2>Scenario Changes{% if active %} <span class="badge badge-override">active</span>{% endif %}</h2>
+                <span class="toggle-icon">&#9660;</span>
+            </div>
+            <div class="sim-body" id="sim-body">
+                <div class="sim-settings">
+                    <div class="sim-setting">
+                        <span class="sim-setting-label">Based on</span>
+                        <label><input type="radio" name="sim_mode" value="ledger" {{ 'checked' if sim_mode == 'ledger' }}> Ledger <small>current balance + actuals + budget items</small></label>
+                        <label><input type="radio" name="sim_mode" value="budget" {{ 'checked' if sim_mode == 'budget' }}> Budget items only <small>ignores actual transactions</small></label>
+                    </div>
+                    <div class="sim-setting">
+                        <label for="sim_start" class="sim-setting-label">Start date</label>
+                        <input type="date" id="sim_start" name="sim_start" value="{{ sim_start }}">
+                        <small>Blank = this month. The 12-month window begins in this month; for a future date, also set the balance you expect to have then.</small>
+                    </div>
+                    <div class="sim-setting">
+                        <label for="sim_start_balance" class="sim-setting-label">Starting balance</label>
+                        <span class="sim-input-prefix">$</span>
+                        <input type="number" step="0.01" id="sim_start_balance" name="sim_start_balance" value="{{ sim_start_balance }}"
+                               placeholder="{{ '0.00' if sim_mode == 'budget' else '%.2f'|format(account_balance) }}">
+                        <small>Blank = {{ '$0' if sim_mode == 'budget' else 'current account balance' }}</small>
+                    </div>
+                </div>
+                <table class="sim-table">
+                    <thead>
+                        <tr>
+                            <th>Budget Item</th>
+                            <th>Account</th>
+                            <th>Freq</th>
+                            <th>Current</th>
+                            <th>Simulated</th>
+                            <th>Off</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in sim_items %}
+                        <tr class="sim-row sim-kind-{{ item.kind }} {{ 'sim-row-changed' if item.changed else '' }} {{ 'sim-row-off' if item.disabled else '' }}">
+                            <td data-label="Item">
+                                <span class="badge badge-{{ item.kind }}-tag">{{ item.kind|capitalize }}</span>
+                                {{ item.description }}
+                            </td>
+                            <td data-label="Account"><span class="account-badge">{{ item.account_name }}</span></td>
+                            <td data-label="Freq">{{ item.frequency }}</td>
+                            <td data-label="Current">${{ "%.2f"|format(item.base_amount) }}</td>
+                            <td data-label="Simulated">
+                                <span class="sim-input-prefix">$</span>
+                                <input type="number" step="0.01" min="0" name="amt_{{ item.id }}"
+                                       class="sim-amount-input" value="{{ '%.2f'|format(item.sim_amount) }}"
+                                       data-base="{{ item.base_amount }}">
+                            </td>
+                            <td data-label="Off" style="text-align:center;">
+                                <input type="checkbox" name="off_{{ item.id }}" value="1" {{ 'checked' if item.disabled else '' }}>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr><td colspan="6">No recurring budget items found.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <h3 class="sim-section-title">Add Hypothetical Items</h3>
+                <p class="sim-hint">e.g. a new mortgage, a second job, a car payment. New items apply to the account currently in view.</p>
+                <table class="sim-table sim-new-table">
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Type</th>
+                            <th>Frequency</th>
+                            <th>Day(s)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="new-items-body">
+                        {% set blank_rows = 2 %}
+                        {% for row in new_items %}
+                        <tr class="sim-new-row">
+                            <td><input type="text" name="new_desc" value="{{ row.description }}" placeholder="New mortgage"></td>
+                            <td><input type="number" step="0.01" min="0" name="new_amount" value="{{ '%.2f'|format(row.amount) }}"></td>
+                            <td>
+                                <select name="new_type">
+                                    <option value="expense" {{ 'selected' if row.type == 'expense' else '' }}>Expense</option>
+                                    <option value="income" {{ 'selected' if row.type == 'income' else '' }}>Income</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="new_freq">
+                                    {% for f in ['monthly', 'weekly', 'biweekly', 'bi-monthly', 'yearly'] %}
+                                    <option value="{{ f }}" {{ 'selected' if row.frequency == f else '' }}>{{ f }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td><input type="text" name="new_day" value="{{ row.day }}" placeholder="1"></td>
+                        </tr>
+                        {% endfor %}
+                        {% for _ in range(blank_rows) %}
+                        <tr class="sim-new-row">
+                            <td><input type="text" name="new_desc" placeholder="New mortgage"></td>
+                            <td><input type="number" step="0.01" min="0" name="new_amount" placeholder="0.00"></td>
+                            <td>
+                                <select name="new_type">
+                                    <option value="expense">Expense</option>
+                                    <option value="income">Income</option>
+                                </select>
+                            </td>
+                            <td>
+                                <select name="new_freq">
+                                    <option value="monthly">monthly</option>
+                                    <option value="weekly">weekly</option>
+                                    <option value="biweekly">biweekly</option>
+                                    <option value="bi-monthly">bi-monthly</option>
+                                    <option value="yearly">yearly</option>
+                                </select>
+                            </td>
+                            <td><input type="text" name="new_day" placeholder="1"></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <button type="button" id="add-new-row" class="action-btn edit-btn" style="margin-top:0.5rem;">+ Add another row</button>
+
+                <div class="sim-actions">
+                    <button type="submit" class="action-btn save-btn">Run Simulation</button>
+                    <a href="{{ url_for('simulation_page', account=account_filter) }}" class="action-btn delete-btn" style="text-decoration:none;">Reset</a>
+                </div>
+            </div>
+        </div>
+    </form>
+
+    <!-- Headline comparison -->
+    <div class="sim-summary-cards">
+        <div class="summary-card">
+            <div class="summary-card-label">12-Month Ending Balance</div>
+            <div class="summary-card-value {{ 'negative-balance' if summary.sim_end < 0 else '' }}">${{ "%.2f"|format(summary.sim_end) }}</div>
+            <div class="summary-card-sub">
+                Baseline: ${{ "%.2f"|format(summary.base_end) }}
+                {% if active %}
+                <span class="sim-delta {{ 'sim-delta-pos' if summary.end_delta >= 0 else 'sim-delta-neg' }}">
+                    ({{ '+' if summary.end_delta >= 0 else '' }}${{ "%.2f"|format(summary.end_delta) }})
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-label">Lowest Point (next 12 mo)</div>
+            <div class="summary-card-value {{ 'negative-balance' if summary.sim_low < 0 else '' }}">${{ "%.2f"|format(summary.sim_low) }}</div>
+            <div class="summary-card-sub">
+                Baseline: ${{ "%.2f"|format(summary.base_low) }}
+                {% if active %}
+                <span class="sim-delta {{ 'sim-delta-pos' if summary.low_delta >= 0 else 'sim-delta-neg' }}">
+                    ({{ '+' if summary.low_delta >= 0 else '' }}${{ "%.2f"|format(summary.low_delta) }})
+                </span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-card-label">Starting Balance</div>
+            <div class="summary-card-value">${{ "%.2f"|format(summary.start_balance) }}</div>
+            <div class="summary-card-sub">{{ 'Budget items only' if sim_mode == 'budget' else 'From ledger' }}{% if sim_start %} · from {{ current_month }}{% endif %}{% if active %} · scenario active{% endif %}</div>
+        </div>
+    </div>
+
+    <!-- Baseline vs Simulated chart -->
+    <div class="outlook-chart-container">
+        <canvas id="simChart" height="200"></canvas>
+    </div>
+
+    <!-- Monthly Forecast Cards (simulated) -->
+    <div class="forecast-strip">
+        {% for month_data in yearly_outlook %}
+        <div class="forecast-card {{ 'forecast-card-negative' if month_data.balance < 0 else 'forecast-card-positive' }} {{ 'forecast-card-warn' if month_data.min_balance is not none and month_data.min_balance < 0 and month_data.balance >= 0 else '' }}"
+             data-target-month="{{ loop.index }}"
+             title="End: ${{ '%.2f'|format(month_data.balance) }} | Low: ${{ '%.2f'|format(month_data.min_balance) }}">
+            <div class="forecast-card-month">{{ month_data.month.split(' ')[0][:3] }}</div>
+            <div class="forecast-card-balance {{ 'negative-balance' if month_data.balance < 0 else '' }}">
+                ${{ "%.2f"|format(month_data.balance) }}
+            </div>
+            {% if month_data.min_balance is not none and month_data.min_balance < 0 and month_data.balance >= 0 %}
+            <div class="forecast-card-lowpoint">&#9888; Low: ${{ "%.2f"|format(month_data.min_balance) }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Simulated outlook table with per-month delta vs baseline -->
+    <div class="outlook-container">
+        <table class="outlook-table">
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th>Simulated Balance</th>
+                    <th>Baseline Balance</th>
+                    <th>Difference</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for month_data in yearly_outlook %}
+                {% set cmp = comparison[loop.index0] %}
+                <tr class="month-row" data-month-id="{{ loop.index }}" data-min-balance="{{ month_data.min_balance }}">
+                    <td class="month-cell">{{ month_data.month }}</td>
+                    <td data-label="Sim" class="{{ 'negative-balance' if month_data.balance < 0 else '' }}">${{ "%.2f"|format(month_data.balance) }}</td>
+                    <td data-label="Base">${{ "%.2f"|format(cmp.base_balance) }}</td>
+                    <td data-label="Δ" class="{{ 'sim-delta-neg' if cmp.delta < 0 else 'sim-delta-pos' }}">
+                        {{ '+' if cmp.delta >= 0 else '' }}${{ "%.2f"|format(cmp.delta) }}
+                    </td>
+                </tr>
+                <tr class="transaction-row" id="transactions-{{ loop.index }}" style="display: {{ 'table-row' if month_data.month == current_month else 'none' }};">
+                    <td colspan="4">
+                        <table class="transaction-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Account</th>
+                                    <th>Amount</th>
+                                    <th>Balance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for trans in month_data.transactions %}
+                                <tr>
+                                    <td data-label="Date">{{ trans.date }}</td>
+                                    <td data-label="Description">{{ trans.description }}</td>
+                                    <td data-label="Account"><span class="account-badge">{{ trans.account_name or 'Primary' }}</span></td>
+                                    <td data-label="Amount" class="{{ 'negative-balance' if trans.amount < 0 else '' }}">${{ "%.2f"|format(trans.amount|abs) }}</td>
+                                    <td data-label="Balance" class="{{ 'negative-balance' if trans.running_balance < 0 else '' }}">${{ "%.2f"|format(trans.running_balance) }}</td>
+                                </tr>
+                                {% else %}
+                                <tr><td colspan="5">No transactions for this month.</td></tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function changeSimAccount(val) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('account', val);
+            window.location.href = url.toString();
+        }
+
+        // Keep the starting-balance placeholder/hint in step with the mode
+        document.querySelectorAll('input[name="sim_mode"]').forEach(r => r.addEventListener('change', () => {
+            const budget = document.querySelector('input[name="sim_mode"]:checked').value === 'budget';
+            const inp = document.getElementById('sim_start_balance');
+            inp.placeholder = budget ? '0.00' : '{{ "%.2f"|format(account_balance) }}';
+            inp.nextElementSibling.textContent = budget ? 'Blank = $0' : 'Blank = current account balance';
+        }));
+
+        // Collapse/expand the controls panel
+        document.getElementById('sim-toggle').addEventListener('click', function () {
+            const body = document.getElementById('sim-body');
+            body.style.display = (body.style.display === 'none') ? 'block' : 'none';
+        });
+
+        // Note: month-row expand/collapse, negative-month auto-expand, and forecast-card
+        // click-to-scroll are all handled by main.js (shared with the ledger).
+
+        // Add another blank "new item" row
+        document.getElementById('add-new-row').addEventListener('click', function () {
+            const body = document.getElementById('new-items-body');
+            const last = body.querySelector('.sim-new-row');
+            const clone = last.cloneNode(true);
+            clone.querySelectorAll('input').forEach(i => i.value = '');
+            clone.querySelectorAll('select').forEach(s => s.selectedIndex = 0);
+            body.appendChild(clone);
+        });
+
+        // Highlight inputs that differ from the base amount
+        document.querySelectorAll('.sim-amount-input').forEach(function (inp) {
+            inp.addEventListener('input', function () {
+                const base = parseFloat(inp.dataset.base || '0');
+                const row = inp.closest('.sim-row');
+                if (Math.abs(parseFloat(inp.value || '0') - base) > 0.005) row.classList.add('sim-row-changed');
+                else row.classList.remove('sim-row-changed');
+            });
+        });
+
+        // Baseline vs Simulated balance chart
+        const cmpData = [
+            {% for c in comparison %}
+            { month: "{{ c.month.split(' ')[0][:3] }}", sim: {{ c.sim_balance }}, base: {{ c.base_balance }} }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+        if (cmpData.length > 0) {
+            const ctx = document.getElementById('simChart');
+            if (ctx) {
+                new Chart(ctx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: cmpData.map(d => d.month),
+                        datasets: [
+                            {
+                                label: 'Simulated',
+                                data: cmpData.map(d => d.sim),
+                                borderColor: '#2e7d32',
+                                backgroundColor: 'rgba(46,125,50,0.08)',
+                                fill: true, tension: 0.3, pointRadius: 4, pointHitRadius: 10, borderWidth: 2,
+                            },
+                            {
+                                label: 'Baseline',
+                                data: cmpData.map(d => d.base),
+                                borderColor: '#888',
+                                borderDash: [5, 5],
+                                fill: false, tension: 0.3, pointRadius: 3, pointHitRadius: 10, borderWidth: 1.5,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function (c) {
+                                        return c.dataset.label + ': $' + c.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: { ticks: { callback: function (v) { return '$' + v.toLocaleString(); } } }
+                        }
+                    }
+                });
+            }
+        }
+    </script>
+{% endblock %}

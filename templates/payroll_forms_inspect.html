@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / Form Templates</div>
+    <h1>IRS Form Templates</h1>
+
+    <div class="data-entry">
+        <h2>Upload a Template</h2>
+        <p class="muted">Upload the official fillable PDF from irs.gov. Templates are stored in MongoDB and persist across deploys.</p>
+        <ul>
+            <li>Form W-2: <a href="https://www.irs.gov/forms-pubs/about-form-w-2" target="_blank">irs.gov/forms-pubs/about-form-w-2</a></li>
+            <li>Schedule H: <a href="https://www.irs.gov/forms-pubs/about-schedule-h-form-1040" target="_blank">irs.gov/forms-pubs/about-schedule-h-form-1040</a></li>
+        </ul>
+        <form method="POST" action="{{ url_for('payroll_forms_upload') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Form Type</label>
+                    <select name="kind" required>
+                        <option value="w2">Form W-2</option>
+                        <option value="sh">Schedule H</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Tax Year</label>
+                    <input type="number" name="year" min="2020" max="2100" required>
+                </div>
+                <div class="form-group" style="flex:2;">
+                    <label>PDF File</label>
+                    <input type="file" name="pdf" accept="application/pdf" required>
+                </div>
+            </div>
+            <button type="submit">Upload</button>
+        </form>
+    </div>
+
+    {% if not results %}
+    <div class="data-entry">
+        <p>No templates uploaded yet. Until you upload templates, the "Generate Tax Forms" button will still produce the EFW2 file (for SSA Copy A filing) but W-2 and Schedule H PDFs will be skipped.</p>
+    </div>
+    {% endif %}
+
+    {% for r in results %}
+    <div class="data-entry">
+        <h2>{{ r.file }} <span class="muted" style="font-size:0.8rem;">({{ r.source }}{% if r.uploaded_at %} · uploaded {{ r.uploaded_at.strftime('%Y-%m-%d %H:%M') }}{% endif %})</span></h2>
+        {% if r.error %}
+        <p style="color:#c66;">Error: {{ r.error }}</p>
+        {% else %}
+        <p class="muted">{{ r.field_count }} form fields found.</p>
+        {% if r.fields %}
+        <details>
+            <summary>Show field names ({{ r.field_count }})</summary>
+            <pre style="font-size:0.85rem; max-height:400px; overflow:auto;">{% for f in r.fields %}{{ f }}
+{% endfor %}</pre>
+        </details>
+        <p class="muted">If generated PDFs come out empty, copy exact field names into <code>forms/w2_fieldmap_&lt;year&gt;.json</code> or <code>forms/schedule_h_fieldmap_&lt;year&gt;.json</code>.</p>
+        {% endif %}
+        {% if r.source.startswith('db') %}
+        <form method="POST" action="{{ url_for('payroll_forms_delete', key=r.file) }}" style="display:inline;" onsubmit="return confirm('Delete this template?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn-danger">Delete</button>
+        </form>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endfor %}
+{% endblock %}

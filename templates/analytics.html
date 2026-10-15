@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Spending Analytics</h1>
+
+    <!-- Month Selector -->
+    <div class="data-entry">
+        <div class="date-selector">
+            <label for="month-select">Select Month:</label>
+            <input type="month" id="month-select" onchange="updateCategoryChart()">
+        </div>
+    </div>
+
+    <!-- Charts Grid -->
+    <div class="charts-grid">
+        <!-- Spending by Category (Pie) -->
+        <div class="chart-card">
+            <h2>Spending by Category</h2>
+            <div class="chart-container">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Monthly Trend (Bar) -->
+        <div class="chart-card">
+            <h2>Monthly Income vs Expenses</h2>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Category Breakdown Table -->
+    <div class="data-entry">
+        <h2>Category Breakdown</h2>
+        <table class="account-table" id="category-table">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th>Amount</th>
+                    <th>% of Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Filled by JavaScript -->
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        // Set default month to current
+        const today = new Date();
+        const monthSelect = document.getElementById('month-select');
+        monthSelect.value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+
+        let categoryChart = null;
+        let trendChart = null;
+
+        // Category colors
+        const categoryColors = [
+            '#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8',
+            '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#6c757d',
+            '#343a40', '#495057'
+        ];
+
+        // Update category chart
+        function updateCategoryChart() {
+            const month = monthSelect.value;
+            fetch(`{{ url_for('spending_by_category_api') }}?month=${month}`)
+                .then(response => response.json())
+                .then(data => {
+                    const ctx = document.getElementById('categoryChart').getContext('2d');
+
+                    if (categoryChart) {
+                        categoryChart.destroy();
+                    }
+
+                    categoryChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                data: data.data,
+                                backgroundColor: categoryColors.slice(0, data.labels.length),
+                                borderWidth: 2,
+                                borderColor: '#fff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    position: 'right',
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const percentage = ((context.parsed / total) * 100).toFixed(1);
+                                            return `${context.label}: $${context.parsed.toLocaleString()} (${percentage}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    // Update table
+                    const tbody = document.querySelector('#category-table tbody');
+                    const total = data.data.reduce((a, b) => a + b, 0);
+                    tbody.innerHTML = data.labels.map((label, i) => {
+                        const amount = data.data[i];
+                        const percentage = total > 0 ? ((amount / total) * 100).toFixed(1) : 0;
+                        return `
+                            <tr>
+                                <td data-label="Category"><span class="category-dot" style="background-color: ${categoryColors[i]}"></span>${label}</td>
+                                <td data-label="Amount">$${amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</td>
+                                <td data-label="% of Total">${percentage}%</td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                    // Add total row
+                    tbody.innerHTML += `
+                        <tr class="total-row">
+                            <td data-label="Category"><strong>Total</strong></td>
+                            <td data-label="Amount"><strong>$${total.toLocaleString(undefined, {minimumFractionDigits: 2})}</strong></td>
+                            <td data-label="% of Total"><strong>100%</strong></td>
+                        </tr>`;
+                });
+        }
+
+        // Load trend chart
+        function loadTrendChart() {
+            fetch('{{ url_for("monthly_trend_api") }}')
+                .then(response => response.json())
+                .then(data => {
+                    const ctx = document.getElementById('trendChart').getContext('2d');
+
+                    trendChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: data.map(d => d.month),
+                            datasets: [{
+                                label: 'Income',
+                                data: data.map(d => d.income),
+                                backgroundColor: '#28a745',
+                                borderRadius: 4
+                            }, {
+                                label: 'Expenses',
+                                data: data.map(d => d.expenses),
+                                backgroundColor: '#dc3545',
+                                borderRadius: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: {
+                                    position: 'top',
+                                },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                                        }
+                                    }
+                                }
+                            },
+                            scales: {
+                                y: {
+                                    beginAtZero: true,
+                                    ticks: {
+                                        callback: function(value) {
+                                            return '$' + value.toLocaleString();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+        }
+
+        // Initialize charts
+        updateCategoryChart();
+        loadTrendChart();
+    </script>
+{% endblock %}

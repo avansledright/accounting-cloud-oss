@@ -1,0 +1,43 @@
+# Python
+*.pyc
+__pycache__/
+.venv/
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Flask
+instance/
+.flaskenv
+
+# Secrets and local config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Your data: never commit statements, exports or backups
+data/
+backups/
+*.csv
+*.archive.gz
+accounting-backup_*.json
+household_profile.md
+
+# Payroll form PDFs you download from the IRS (forms/README.md)
+forms/*.pdf
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+deploy/kubernetes/secret.yaml

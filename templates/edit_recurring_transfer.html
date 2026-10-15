@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Edit Recurring Transfer</h1>
+
+    <div class="data-entry">
+        <form method="POST" action="{{ url_for('edit_recurring_transfer', rt_id=recurring_transfer._id) }}" class="transfer-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="from_account_id">From Account:</label>
+                    <select id="from_account_id" name="from_account_id" required>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}" {{ 'selected' if account._id == recurring_transfer.from_account_id else '' }}>{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="to_account_id">To Account:</label>
+                    <select id="to_account_id" name="to_account_id" required>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}" {{ 'selected' if account._id == recurring_transfer.to_account_id else '' }}>{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount:</label>
+                    <input type="number" id="amount" name="amount" value="{{ recurring_transfer.amount }}" step="0.01" min="0.01" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="frequency">Frequency:</label>
+                    <select id="frequency" name="frequency" required>
+                        <option value="weekly" {{ 'selected' if recurring_transfer.frequency == 'weekly' else '' }}>Weekly</option>
+                        <option value="biweekly" {{ 'selected' if recurring_transfer.frequency == 'biweekly' else '' }}>Bi-Weekly (every 14 days)</option>
+                        <option value="monthly" {{ 'selected' if recurring_transfer.frequency == 'monthly' else '' }}>Monthly</option>
+                        <option value="bi-monthly" {{ 'selected' if recurring_transfer.frequency == 'bi-monthly' else '' }}>Bi-Monthly</option>
+                        <option value="yearly" {{ 'selected' if recurring_transfer.frequency == 'yearly' else '' }}>Yearly</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="day_of_month">Day(s) of Month:</label>
+                    <input type="text" id="day_of_month" name="day_of_month" value="{{ recurring_transfer.day_of_month or '' }}" placeholder="e.g., 1 or 1,15">
+                </div>
+                <div class="form-group">
+                    <label for="start_date">Start Date:</label>
+                    <input type="date" id="start_date" name="start_date" value="{{ recurring_transfer.start_date }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_date">End Date:</label>
+                    <input type="date" id="end_date" name="end_date" value="{{ recurring_transfer.end_date or '' }}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <input type="text" id="description" name="description" value="{{ recurring_transfer.description }}" placeholder="e.g., Monthly savings">
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes:</label>
+                    <input type="text" id="notes" name="notes" value="{{ recurring_transfer.notes or '' }}" placeholder="Optional notes">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit">Save Changes</button>
+                <a href="{{ url_for('transfers_page') }}" class="cancel-btn">Cancel</a>
+            </div>
+        </form>
+    </div>
+{% endblock %}

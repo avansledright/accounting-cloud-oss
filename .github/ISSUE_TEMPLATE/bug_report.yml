@@ -1,0 +1,40 @@
+name: Bug report
+description: Something is broken or calculates the wrong number
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Do not paste real financial data, account numbers, statements, or screenshots that show them.** Reproduce with the demo data (`scripts/seed_demo.py`) or made-up numbers where you can.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to /budget
+        2. Add a recurring item with ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: How are you running it?
+      options: [Docker Compose, Kubernetes, Local Python, Other]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Scrub anything personal first.
+      render: text

@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <nav class="breadcrumb">
+        <a href="{{ url_for('accounts_page') }}">Accounts</a>
+        <span class="breadcrumb-sep">&rsaquo;</span>
+        <span>{{ account.name }}</span>
+    </nav>
+    <h1>{{ account.name }}</h1>
+    <p class="account-detail-meta">
+        {{ dict(account_types).get(account.account_type, account.account_type) }}
+        {% if account.institution %} &middot; {{ account.institution }}{% endif %}
+        {% if account.account_number %} &middot; ...{{ account.account_number }}{% endif %}
+        {% if account.get('management_type') == 'managed' %}
+            &middot; <span class="badge badge-actual">Managed</span>
+        {% elif account.get('management_type') == 'self_managed' %}
+            &middot; <span class="badge badge-projected">Self-Managed</span>
+        {% endif %}
+    </p>
+
+    <!-- Balance Card -->
+    <div class="summary-cards">
+        <div class="summary-card {{ 'positive' if account.balance >= 0 else 'negative' }}">
+            <span class="summary-label">Current Balance</span>
+            <span class="summary-amount">${{ "%.2f"|format(account.balance) }}</span>
+            {% if account.get('balance_as_of_date') %}
+            <span class="summary-sub">as of {{ account.balance_as_of_date.strftime('%b %d, %Y') if account.balance_as_of_date is not string else account.balance_as_of_date[:10] }}</span>
+            {% endif %}
+        </div>
+        {% if is_investment and account.get('estimated_return_rate') %}
+        <div class="summary-card income">
+            <span class="summary-label">Est. Annual Return</span>
+            <span class="summary-amount">{{ "%.1f"|format(account.estimated_return_rate) }}%</span>
+        </div>
+        {% endif %}
+        {% if recurring_items %}
+        <div class="summary-card income">
+            <span class="summary-label">Monthly Deposits</span>
+            <span class="summary-amount">${{ "%.2f"|format(recurring_items|selectattr('type', 'equalto', 'income')|map(attribute='monthly')|sum) }}</span>
+        </div>
+        {% endif %}
+        {% if projection %}
+        <div class="summary-card investments">
+            <span class="summary-label">Projected (10yr)</span>
+            <span class="summary-amount">${{ "%.2f"|format(projection[-1].projected_value) }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Recurring Items -->
+    {% if recurring_items %}
+    <div class="account-section">
+        <h2>Recurring Items</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Frequency</th>
+                    <th>Type</th>
+                    <th>Monthly Equiv.</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in recurring_items %}
+                <tr>
+                    <td>{{ item.description }}</td>
+                    <td>${{ "%.2f"|format(item.amount) }}</td>
+                    <td>{{ item.frequency|capitalize }}</td>
+                    <td><span class="badge {{ 'badge-actual' if item.type == 'income' else 'badge-projected' }}">{{ item.type|capitalize }}</span></td>
+                    <td>${{ "%.2f"|format(item.monthly) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Investment Projection Chart -->
+    {% if projection %}
+    <div class="account-section">
+        <h2>Growth Projection</h2>
+        <div class="projection-controls">
+            <label for="horizon-select">Projection Horizon:</label>
+            <select id="horizon-select" onchange="window.location.href='?horizon=' + this.value">
+                <option value="60" {{ 'selected' if projection|length <= 61 else '' }}>5 Years</option>
+                <option value="120" {{ 'selected' if projection|length > 61 and projection|length <= 121 else '' }}>10 Years</option>
+                <option value="240" {{ 'selected' if projection|length > 121 and projection|length <= 241 else '' }}>20 Years</option>
+                <option value="360" {{ 'selected' if projection|length > 241 else '' }}>30 Years</option>
+            </select>
+        </div>
+        <div class="chart-container" style="position: relative; height: 400px;">
+            <canvas id="projectionChart"></canvas>
+        </div>
+
+        <!-- Milestone Table -->
+        <div class="projection-milestones">
+            <h3>Milestones</h3>
+            <table class="account-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Projected Value</th>
+                        <th>Total Deposits</th>
+                        <th>Total Growth</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in projection %}
+                    {% if p.month_index in [12, 60, 120, 240, projection|length - 1] %}
+                    <tr>
+                        <td>{{ p.month_label }}</td>
+                        <td class="positive-amount">${{ "%.2f"|format(p.projected_value) }}</td>
+                        <td>${{ "%.2f"|format(p.total_deposits) }}</td>
+                        <td class="{{ 'positive-amount' if p.total_growth >= 0 else 'negative-balance' }}">${{ "%.2f"|format(p.total_growth) }}</td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const projectionData = {{ projection|tojson }};
+
+        // Sample labels for readability (show every 12th month)
+        const labels = projectionData.map(p => p.month_label);
+        const values = projectionData.map(p => p.projected_value);
+        const deposits = projectionData.map(p => p.total_deposits + {{ account.balance }});
+
+        const ctx = document.getElementById('projectionChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Projected Value',
+                        data: values,
+                        borderColor: '#2e7d32',
+                        backgroundColor: 'rgba(46, 125, 50, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHitRadius: 10,
+                    },
+                    {
+                        label: 'Deposits Only (no growth)',
+                        data: deposits,
+                        borderColor: '#1976d2',
+                        backgroundColor: 'rgba(25, 118, 210, 0.05)',
+                        fill: true,
+                        borderDash: [5, 5],
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHitRadius: 10,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': $' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                            }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                    }
+                },
+                scales: {
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 12,
+                            maxRotation: 45,
+                        },
+                        grid: {
+                            display: false,
+                        }
+                    },
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+    {% endif %}
+
+    {% if not is_investment and yearly_outlook %}
+    <!-- Yearly Outlook for Cash Accounts -->
+    <div class="account-section">
+        <h2>12-Month Outlook
+            <a href="{{ url_for('ledger_page') }}?account={{ account._id }}" style="font-size: 0.8rem; font-weight: normal; margin-left: 1rem;">Full Ledger &rarr;</a>
+        </h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th>End Balance</th>
+                    <th>Low Point</th>
+                    <th>Income</th>
+                    <th>Expenses</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for month in yearly_outlook %}
+                <tr>
+                    <td data-label="Month"><strong>{{ month.month }}</strong></td>
+                    <td data-label="End Balance">
+                        <span class="{{ 'positive-amount' if month.balance >= 0 else 'negative-balance' }}">${{ "%.2f"|format(month.balance) }}</span>
+                    </td>
+                    <td data-label="Low Point">
+                        {% if month.min_balance < 0 %}
+                            <span class="negative-balance">&#9888; ${{ "%.2f"|format(month.min_balance) }}</span>
+                        {% else %}
+                            ${{ "%.2f"|format(month.min_balance) }}
+                        {% endif %}
+                    </td>
+                    <td data-label="Income" class="positive-amount">
+                        ${{ "%.2f"|format(month.transactions|selectattr('amount', 'gt', 0)|map(attribute='amount')|sum) }}
+                    </td>
+                    <td data-label="Expenses">
+                        ${{ "%.2f"|format(month.transactions|selectattr('amount', 'lt', 0)|map(attribute='amount')|sum|abs) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif not is_investment %}
+    <div class="account-section">
+        <p style="text-align: center; color: #6c757d; padding: 2rem;">
+            <a href="{{ url_for('ledger_page') }}?account={{ account._id }}">View in Ledger &rarr;</a>
+        </p>
+    </div>
+    {% elif not projection %}
+    <div class="account-section">
+        <p style="text-align: center; color: #6c757d; padding: 2rem;">
+            Set an estimated annual return rate on this account to see growth projections.
+            <br><a href="{{ url_for('edit_account', account_id=account._id) }}">Edit Account &rarr;</a>
+        </p>
+    </div>
+    {% endif %}
+
+    <div class="form-actions" style="margin-top: 2rem;">
+        <a href="{{ url_for('accounts_page') }}" class="action-btn cancel-btn">Back to Accounts</a>
+        <a href="{{ url_for('edit_account', account_id=account._id) }}" class="action-btn edit-btn">Edit Account</a>
+    </div>
+
+{% endblock %}

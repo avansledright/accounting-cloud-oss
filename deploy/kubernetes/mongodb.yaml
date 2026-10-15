@@ -1,0 +1,63 @@
+# Single-member MongoDB with a persistent volume. Good enough for one household.
+# For high availability run a 3-member replica set (or an operator such as the
+# MongoDB Community Operator) and point MONGO_URI at it with ?replicaSet=...
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  namespace: accounting
+spec:
+  selector:
+    app: mongodb
+  ports:
+  - port: 27017
+    targetPort: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  namespace: accounting
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb
+  template:
+    metadata:
+      labels:
+        app: mongodb
+    spec:
+      containers:
+      - name: mongodb
+        image: mongo:7.0
+        ports:
+        - containerPort: 27017
+        volumeMounts:
+        - name: data
+          mountPath: /data/db
+        resources:
+          requests: {memory: "256Mi", cpu: "100m"}
+          limits: {memory: "1Gi"}
+        readinessProbe:
+          exec:
+            command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+          periodSeconds: 10
+          timeoutSeconds: 10
+        livenessProbe:
+          exec:
+            command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          timeoutSeconds: 10
+          failureThreshold: 6
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      # storageClassName: your-storage-class
+      resources:
+        requests:
+          storage: 5Gi

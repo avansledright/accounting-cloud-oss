@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .reports-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .reports-header h1 { margin: 0; }
+
+  .advisor-layout {
+    display: grid;
+    grid-template-columns: 1fr 260px;
+    gap: 1.5rem;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .advisor-layout { grid-template-columns: 1fr; }
+  }
+
+  .report-card {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .report-card h2 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+  .report-meta {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #6b7280);
+    margin-bottom: 1rem;
+  }
+
+  .report-insights {
+    background: linear-gradient(135deg, #eff6ff, #f0f9ff);
+    border: 1px solid #bfdbfe;
+    border-radius: 8px;
+    padding: 1.25rem 1.5rem;
+    line-height: 1.65;
+    font-size: 0.95rem;
+  }
+  .report-insights h2,
+  .report-insights h3 { margin-top: 1rem; margin-bottom: 0.4rem; }
+  .report-insights h2:first-child,
+  .report-insights h3:first-child { margin-top: 0; }
+  .report-insights ul, .report-insights ol { margin: 0.4rem 0 0.8rem 1.2rem; }
+  .report-insights p { margin: 0.4rem 0; }
+  .report-insights code {
+    background: rgba(0,0,0,0.05);
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+  }
+
+  .report-insights.unavailable {
+    background: var(--surface-alt, #f9fafb);
+    border-color: var(--border, #e5e7eb);
+    color: var(--text-secondary, #6b7280);
+    font-style: italic;
+  }
+
+  details.raw-data {
+    margin-top: 1rem;
+    border-top: 1px dashed var(--border, #e5e7eb);
+    padding-top: 0.75rem;
+  }
+  details.raw-data summary {
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #6b7280);
+    user-select: none;
+  }
+  .report-section { margin-top: 0.75rem; }
+  .report-section h3 {
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0.3rem;
+    color: var(--text-secondary, #6b7280);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .report-data {
+    white-space: pre-wrap;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    background: var(--surface-alt, #f9fafb);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 6px;
+    padding: 0.6rem 0.8rem;
+    overflow-x: auto;
+  }
+
+  .report-empty {
+    text-align: center;
+    padding: 2.5rem 1rem;
+    color: var(--text-secondary, #6b7280);
+  }
+
+  .regenerate-form {
+    display: inline-flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .regenerate-form select,
+  .regenerate-form button {
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    border: 1px solid var(--border, #e5e7eb);
+  }
+  .regenerate-form button {
+    background: var(--primary, #3b82f6);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  .history-card {
+    background: var(--surface, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+  }
+  .history-card h3 {
+    margin: 0 0 0.6rem;
+    font-size: 0.95rem;
+  }
+  .history-list {
+    list-style: none;
+    padding: 0; margin: 0;
+    max-height: 480px;
+    overflow-y: auto;
+  }
+  .history-list li {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border, #f1f5f9);
+    font-size: 0.82rem;
+  }
+  .history-list li:last-child { border-bottom: none; }
+  .history-list a { text-decoration: none; color: var(--text-primary, #1f2937); }
+  .history-list a:hover { color: var(--primary, #3b82f6); }
+  .history-type {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-right: 0.4rem;
+  }
+  .history-type.weekly { background: #ddd6fe; color: #5b21b6; }
+  .history-type.monthly { background: #bbf7d0; color: #14532d; }
+  .history-type.portfolio { background: #fde68a; color: #78350f; }
+</style>
+
+<div class="reports-header">
+  <h1>AI Advisor</h1>
+  <form class="regenerate-form" method="POST" action="{{ url_for('generate_reports') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <select name="report_type">
+      <option value="weekly">Weekly Briefing</option>
+      <option value="monthly">Monthly Review</option>
+      <option value="portfolio">Portfolio Review</option>
+      <option value="both">Weekly + Monthly</option>
+      <option value="all">All Three</option>
+    </select>
+    <button type="submit">Regenerate now</button>
+  </form>
+</div>
+
+{% if jobs %}
+<div id="job-banner" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;
+     padding:0.75rem 1rem;margin-bottom:1.25rem;font-size:0.9rem;display:flex;
+     justify-content:space-between;align-items:center;gap:1rem;">
+  <div>
+    <strong>Generating:</strong>
+    {% for kind, info in jobs.items() %}
+      <span style="margin-right:0.75rem;">
+        {{ kind }} {% if info.error %}<span style="color:#b91c1c;">(failed: {{ info.error }})</span>{% else %}<span class="elapsed" data-kind="{{ kind }}">…</span>{% endif %}
+      </span>
+    {% endfor %}
+    <div style="font-size:0.78rem;color:#92400e;margin-top:0.2rem;">
+      The LLM can take several minutes, especially on a cold start or CPU-only host. This page refreshes automatically.
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    function poll() {
+      fetch('{{ url_for("reports_status") }}', {cache: 'no-store'})
+        .then(r => r.json())
+        .then(data => {
+          var jobs = data.jobs || {};
+          var stillRunning = false;
+          document.querySelectorAll('.elapsed').forEach(function (el) {
+            var k = el.dataset.kind;
+            if (jobs[k] && !jobs[k].error) {
+              stillRunning = true;
+              el.textContent = '(' + jobs[k].elapsed_seconds + 's)';
+            }
+          });
+          if (!stillRunning) {
+            window.location.reload();
+          } else {
+            setTimeout(poll, 3000);
+          }
+        })
+        .catch(function () { setTimeout(poll, 5000); });
+    }
+    setTimeout(poll, 2000);
+  })();
+</script>
+{% endif %}
+
+<div class="advisor-layout">
+  <div>
+    {% if weekly %}
+    <div class="report-card">
+      <h2>Weekly Briefing</h2>
+      <div class="report-meta">{{ weekly.period }} &middot; Generated {{ weekly.date.strftime('%b %d, %Y at %I:%M %p') }}</div>
+
+      {% if weekly.insights_html %}
+      <div class="report-insights">{{ weekly.insights_html|safe }}</div>
+      {% else %}
+      <div class="report-insights unavailable">AI insights unavailable — Ollama did not respond.</div>
+      {% endif %}
+
+      <details class="raw-data">
+        <summary>Underlying data sent to the model</summary>
+        <div class="report-section"><h3>Spending by Category</h3>
+          <div class="report-data">{{ weekly.data.spending_by_category }}</div></div>
+        <div class="report-section"><h3>Budget Status</h3>
+          <div class="report-data">{{ weekly.data.budget_status }}</div></div>
+        <div class="report-section"><h3>Recurring Items</h3>
+          <div class="report-data">{{ weekly.data.recurring_items }}</div></div>
+      </details>
+    </div>
+    {% else %}
+    <div class="report-card report-empty">
+      <h2>Weekly Briefing</h2>
+      <p>No weekly briefing yet. They run automatically every Monday at 6am.</p>
+    </div>
+    {% endif %}
+
+    {% if monthly %}
+    <div class="report-card">
+      <h2>Monthly Review</h2>
+      <div class="report-meta">{{ monthly.period }} &middot; Generated {{ monthly.date.strftime('%b %d, %Y at %I:%M %p') }}</div>
+
+      {% if monthly.insights_html %}
+      <div class="report-insights">{{ monthly.insights_html|safe }}</div>
+      {% else %}
+      <div class="report-insights unavailable">AI insights unavailable — Ollama did not respond.</div>
+      {% endif %}
+
+      <details class="raw-data">
+        <summary>Underlying data sent to the model</summary>
+        <div class="report-section"><h3>Account Balances</h3>
+          <div class="report-data">{{ monthly.data.account_balances }}</div></div>
+        <div class="report-section"><h3>Net Worth</h3>
+          <div class="report-data">{{ monthly.data.net_worth }}</div></div>
+        <div class="report-section"><h3>Spending by Category</h3>
+          <div class="report-data">{{ monthly.data.spending_by_category }}</div></div>
+        <div class="report-section"><h3>Budget Status</h3>
+          <div class="report-data">{{ monthly.data.budget_status }}</div></div>
+        <div class="report-section"><h3>Cash Flow Outlook</h3>
+          <div class="report-data">{{ monthly.data.cash_flow_outlook }}</div></div>
+        {% if monthly.data.negative_balance_months and 'No negative' not in monthly.data.negative_balance_months %}
+        <div class="report-section"><h3>Negative Balance Months</h3>
+          <div class="report-data">{{ monthly.data.negative_balance_months }}</div></div>
+        {% endif %}
+        <div class="report-section"><h3>Portfolio Summary</h3>
+          <div class="report-data">{{ monthly.data.portfolio_summary }}</div></div>
+        <div class="report-section"><h3>YTD Dividends</h3>
+          <div class="report-data">{{ monthly.data.ytd_dividends }}</div></div>
+        <div class="report-section"><h3>Debts</h3>
+          <div class="report-data">{{ monthly.data.debts }}</div></div>
+      </details>
+    </div>
+    {% else %}
+    <div class="report-card report-empty">
+      <h2>Monthly Review</h2>
+      <p>No monthly review yet. They run on the 1st of each month at 6am.</p>
+    </div>
+    {% endif %}
+
+    {% if portfolio %}
+    <div class="report-card">
+      <h2>Portfolio Review</h2>
+      <div class="report-meta">{{ portfolio.period }} &middot; Generated {{ portfolio.date.strftime('%b %d, %Y at %I:%M %p') }}</div>
+
+      {% if portfolio.insights_html %}
+      <div class="report-insights">{{ portfolio.insights_html|safe }}</div>
+      {% else %}
+      <div class="report-insights unavailable">AI insights unavailable — Ollama did not respond.</div>
+      {% endif %}
+
+      <details class="raw-data">
+        <summary>Underlying data sent to the model</summary>
+        <div class="report-section"><h3>Portfolio Summary</h3>
+          <div class="report-data">{{ portfolio.data.portfolio_summary }}</div></div>
+        <div class="report-section"><h3>Holdings</h3>
+          <div class="report-data">{{ portfolio.data.holdings }}</div></div>
+        <div class="report-section"><h3>YTD Dividends</h3>
+          <div class="report-data">{{ portfolio.data.ytd_dividends }}</div></div>
+        <div class="report-section"><h3>Recent Dividends</h3>
+          <div class="report-data">{{ portfolio.data.recent_dividends }}</div></div>
+        <div class="report-section"><h3>Investment Account Balances</h3>
+          <div class="report-data">{{ portfolio.data.investment_balances }}</div></div>
+      </details>
+    </div>
+    {% else %}
+    <div class="report-card report-empty">
+      <h2>Portfolio Review</h2>
+      <p>No portfolio review yet. They run monthly alongside the monthly review, or click Regenerate.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  <aside class="history-card">
+    <h3>Past briefings</h3>
+    {% if history %}
+    <ul class="history-list">
+      {% for r in history %}
+      <li>
+        <a href="{{ url_for('report_detail', report_id=r._id) }}">
+          <span class="history-type {{ r.type }}">{{ r.type }}</span>
+          {{ r.period }}
+          <div style="font-size:0.72rem;color:#9ca3af;margin-top:0.15rem;">
+            {{ r.date.strftime('%b %d, %Y') }}
+          </div>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p style="font-size:0.82rem;color:#9ca3af;margin:0;">No reports yet.</p>
+    {% endif %}
+  </aside>
+</div>
+
+{% endblock %}

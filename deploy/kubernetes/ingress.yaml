@@ -1,0 +1,42 @@
+# !!! READ BEFORE APPLYING !!!
+# The app has NO built-in authentication. Anyone who can reach this Ingress can
+# read and change all of your financial data. Do not apply this without an
+# authentication layer in front of it. Pick ONE of the options below (or use
+# your own SSO / VPN) and fill it in.
+#
+# Option A, ingress-nginx + oauth2-proxy (or any forward-auth service):
+#   nginx.ingress.kubernetes.io/auth-url: "https://auth.example.com/oauth2/auth"
+#   nginx.ingress.kubernetes.io/auth-signin: "https://auth.example.com/oauth2/start?rd=$scheme://$host$escaped_request_uri"
+#
+# Option B, ingress-nginx basic auth (htpasswd Secret named accounting-basic-auth):
+#   nginx.ingress.kubernetes.io/auth-type: basic
+#   nginx.ingress.kubernetes.io/auth-secret: accounting-basic-auth
+#   nginx.ingress.kubernetes.io/auth-realm: "Accounting"
+#
+# Option C, Traefik with a ForwardAuth Middleware (Authelia, Authentik, oauth2-proxy):
+#   traefik.ingress.kubernetes.io/router.middlewares: <namespace>-<middleware>@kubernetescrd
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: accounting
+  namespace: accounting
+  annotations:
+    # Uploads (statement CSVs, backups) can be up to 16 MB.
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+    # --- add your authentication annotations here ---
+spec:
+  # ingressClassName: nginx
+  tls:
+  - hosts: [accounting.example.com]
+    secretName: accounting-tls
+  rules:
+  - host: accounting.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: accounting
+            port:
+              number: 5000

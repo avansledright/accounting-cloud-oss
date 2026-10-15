@@ -1,0 +1,60 @@
+# Optional MCP server. Stateless streamable HTTP at /http, so it can scale out.
+# It has full WRITE access to the database and authenticates with the bearer
+# token in accounting-secret/MCP_API_TOKEN (refuses everything if unset).
+# MCP clients usually can't complete an SSO browser login, so expose it on a
+# separate host/path that bypasses SSO but REQUIRES TLS, or keep it cluster-
+# or VPN-internal.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounting-mcp
+  namespace: accounting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: accounting-mcp
+  template:
+    metadata:
+      labels:
+        app: accounting-mcp
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+      - name: accounting-mcp
+        image: ghcr.io/your-user/accounting-cloud:latest
+        command: ["python", "mcp_server.py"]
+        ports:
+        - containerPort: 8765
+          name: mcp
+        envFrom:
+        - configMapRef:
+            name: accounting-config
+        env:
+        - name: MCP_HOST
+          value: "0.0.0.0"
+        - name: MCP_PORT
+          value: "8765"
+        - name: MCP_API_TOKEN
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: MCP_API_TOKEN}}
+        resources:
+          requests: {memory: "128Mi", cpu: "50m"}
+          limits: {memory: "256Mi"}
+        readinessProbe:
+          tcpSocket: {port: mcp}
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounting-mcp
+  namespace: accounting
+spec:
+  selector:
+    app: accounting-mcp
+  ports:
+  - port: 8765
+    targetPort: mcp
+    name: mcp

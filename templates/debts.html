@@ -1,0 +1,609 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Debt Payoff Planner</h1>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card expenses">
+            <span class="summary-label">Total Debt</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total_debt) }}</span>
+        </div>
+        <div class="summary-card negative">
+            <span class="summary-label">Monthly Minimums</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total_minimums) }}</span>
+        </div>
+        <div class="summary-card investments">
+            <span class="summary-label">Avg Interest Rate</span>
+            <span class="summary-amount">{{ "%.1f"|format(summary.avg_rate) }}%</span>
+        </div>
+    </div>
+
+    {% if request.args.get('linked') is not none %}
+    <div class="summary-card investments" style="display:block;margin-bottom:1rem;padding:0.75rem 1rem;">
+        Re-synced — linked {{ request.args.get('linked') }} new payment(s) to loans.
+    </div>
+    {% endif %}
+
+    <!-- Payoff Plan -->
+    <div class="data-entry payoff-plan">
+        <div class="dashboard-card-header" style="margin-bottom:0.75rem;">
+            <h2 style="margin:0;">Payoff Plan</h2>
+            {% if plan.target %}
+            <span class="dashboard-card-meta">
+                {{ plan.strategy|capitalize }} · debt-free
+                {% if plan.debtfree_label %}<strong>{{ plan.debtfree_label }}</strong> ({{ plan.months_to_free }} mo){% else %}—{% endif %}
+            </span>
+            {% endif %}
+        </div>
+
+        {% if not plan.target %}
+        <p style="color:#28a745;font-weight:600;margin:0;">🎉 No active debts — you're debt-free!</p>
+        {% else %}
+
+        <!-- Plan settings -->
+        <form method="POST" action="{{ url_for('save_debt_plan') }}" id="plan-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row" style="display:flex;flex-wrap:wrap;gap:1.5rem;align-items:flex-end;">
+                <div class="form-group">
+                    <label>Strategy:</label>
+                    <div style="display:flex;gap:1rem;">
+                        <label style="font-weight:400;"><input type="radio" name="strategy" value="avalanche" {{ 'checked' if plan.strategy == 'avalanche' else '' }}> Avalanche <small>(highest rate)</small></label>
+                        <label style="font-weight:400;"><input type="radio" name="strategy" value="snowball" {{ 'checked' if plan.strategy == 'snowball' else '' }}> Snowball <small>(lowest balance)</small></label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label style="font-weight:400;">
+                        <input type="checkbox" name="auto_extra" id="auto-extra" value="1" {{ 'checked' if plan.auto_extra else '' }}>
+                        Use my monthly surplus (<strong>${{ "%.0f"|format(plan.surplus) }}</strong>)
+                    </label>
+                    <div style="margin-top:0.4rem;">
+                        <label for="extra-input" style="font-size:0.85rem;color:#6c757d;">Extra monthly payment: $</label>
+                        <input type="number" id="extra-input" name="extra_payment" value="{{ '%.0f'|format(plan.extra) }}" min="0" step="10" style="width:110px;padding:0.4rem;border:1px solid #ccc;border-radius:4px;">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="plan-cash-account">Pay from:</label>
+                    <select id="plan-cash-account" name="cash_account_id" style="padding:0.4rem;border:1px solid #ccc;border-radius:4px;">
+                        <option value="">Primary account</option>
+                        {% for a in cash_accounts %}
+                        <option value="{{ a._id }}" {{ 'selected' if plan.cash_account_id == a._id else '' }}>{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label style="font-weight:400;">
+                        <input type="checkbox" name="create_recurring" value="1" {{ 'checked' if plan.has_recurring else '' }}>
+                        Reserve in budget (recurring line)
+                    </label>
+                </div>
+                <button type="submit" class="action-btn edit-btn">Save Plan</button>
+            </div>
+        </form>
+
+        <!-- Fit indicator -->
+        <p class="plan-fit {{ 'fits' if plan.fits else 'over' }}" style="margin:0.75rem 0;">
+            {% if plan.fits %}
+                ✓ ${{ "%.0f"|format(plan.extra) }}/mo extra fits your ${{ "%.0f"|format(plan.surplus) }} projected surplus.
+            {% else %}
+                ⚠ ${{ "%.0f"|format(plan.extra) }}/mo extra is <strong>${{ "%.0f"|format(plan.over_by) }} over</strong> your ${{ "%.0f"|format(plan.surplus) }} projected surplus.
+            {% endif %}
+            {% if plan.interest_saved > 0 %}
+                <span style="color:#28a745;">Saves ~${{ "{:,.0f}".format(plan.interest_saved) }} interest{% if plan.months_saved %} · {{ plan.months_saved }} mo sooner{% endif %}.</span>
+            {% endif %}
+        </p>
+
+        <!-- Target + log payment -->
+        <div class="plan-target">
+            <div>
+                <span class="dashboard-card-meta">Attack next</span>
+                <div style="font-size:1.1rem;font-weight:600;">{{ plan.target_name }}
+                    <span style="color:#6c757d;font-weight:400;font-size:0.9rem;">· ${{ "%.0f"|format(plan.extra) }} extra this month</span>
+                </div>
+            </div>
+            {% if plan.extra > 0 %}
+            <form method="POST" action="{{ url_for('log_debt_payment') }}" class="log-payment-form" onsubmit="return confirm('Log a ${{ '%.0f'|format(plan.extra) }} payment to {{ plan.target_name }}?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="number" name="amount" value="{{ '%.0f'|format(plan.extra) }}" min="0" step="10" style="width:100px;padding:0.4rem;border:1px solid #ccc;border-radius:4px;">
+                <input type="hidden" name="cash_account_id" value="{{ plan.cash_account_id or '' }}">
+                <button type="submit" class="action-btn verify-btn">Log payment</button>
+            </form>
+            {% endif %}
+        </div>
+
+        <!-- Ordered schedule -->
+        <table class="account-table compact" style="margin-top:1rem;">
+            <thead><tr><th>#</th><th>Debt</th><th style="text-align:right;">Balance</th><th style="text-align:right;">Rate</th><th style="text-align:right;">Min</th><th style="text-align:right;">Paid off</th></tr></thead>
+            <tbody>
+                {% for d in plan.schedule %}
+                <tr class="{{ 'plan-target-row' if d.is_target else '' }}">
+                    <td data-label="#">{{ d.order }}</td>
+                    <td data-label="Debt">{{ d.name }}{% if d.is_target %} <span class="target-tag">TARGET</span>{% endif %}</td>
+                    <td data-label="Balance" style="text-align:right;">${{ "%.2f"|format(d.balance) }}</td>
+                    <td data-label="Rate" style="text-align:right;">{{ "%.2f"|format(d.interest_rate) }}%</td>
+                    <td data-label="Min" style="text-align:right;">${{ "%.0f"|format(d.minimum_payment) }}</td>
+                    <td data-label="Paid off" style="text-align:right;">{{ d.payoff_eta or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p style="color:#6c757d;font-size:0.8rem;margin-top:0.5rem;">Minimum payments should already be in your budget as recurring bills; "extra" is what the surplus adds on top, rolled into the target. Logging a payment writes a real ledger entry linked to the target debt.</p>
+        {% endif %}
+    </div>
+
+    <!-- Auto-link recurring payments -->
+    <div class="data-entry" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+        <div>
+            <strong>Loan payments link automatically</strong>
+            <p style="color:#6c757d;margin:0.25rem 0 0;">Each payment attaches to its loan by matching its budget-item description (e.g. "Mortgage", "Car Payment") — no manual linking needed. Adjust a loan's match phrases under Edit.</p>
+        </div>
+        <form method="POST" action="{{ url_for('auto_link_payments') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="action-btn edit-btn">Re-sync now</button>
+        </form>
+    </div>
+
+    <!-- Payoff Calculator -->
+    <div class="calculator-section">
+        <h2>Payoff Calculator</h2>
+        <p style="color: #6c757d; margin-bottom: 1rem;">Enter an extra monthly payment to see how much faster you can be debt-free.</p>
+        <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem;">
+            <label for="extra-payment" style="font-weight: 600;">Extra Monthly Payment: $</label>
+            <input type="number" id="extra-payment" value="0" min="0" step="10" style="padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px; width: 120px;">
+            <button id="calculate-btn" class="action-btn verify-btn" style="padding: 0.5rem 1.5rem; height: 38px; min-width: auto;">Calculate</button>
+        </div>
+        <div id="payoff-results" class="strategy-columns" style="display: none;">
+            <div class="strategy-card">
+                <h3>Avalanche (Highest Rate First)</h3>
+                <div class="strategy-summary">
+                    <p>Time to payoff: <strong id="avalanche-months">--</strong> months</p>
+                    <p>Total interest: <strong id="avalanche-interest">--</strong></p>
+                </div>
+                <div id="avalanche-debts"></div>
+            </div>
+            <div class="strategy-card">
+                <h3>Snowball (Lowest Balance First)</h3>
+                <div class="strategy-summary">
+                    <p>Time to payoff: <strong id="snowball-months">--</strong> months</p>
+                    <p>Total interest: <strong id="snowball-interest">--</strong></p>
+                </div>
+                <div id="snowball-debts"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Debt Form -->
+    <div class="data-entry">
+        <div class="transfer-header" id="add-debt-toggle">
+            <h2>Add Debt</h2>
+            <span class="toggle-icon">&#9660;</span>
+        </div>
+        <div id="add-debt-body" style="display: none;">
+            <form method="POST" action="{{ url_for('add_debt') }}" class="budget-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="name">Debt Name:</label>
+                        <input type="text" id="name" name="name" placeholder="e.g., Rewards Visa" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="debt_type">Type:</label>
+                        <select id="debt_type" name="debt_type" required>
+                            {% for value, label in debt_types %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="balance">Starting Balance:</label>
+                        <input type="number" id="balance" name="balance" placeholder="0.00" step="0.01" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="interest_rate">Interest Rate (APR %):</label>
+                        <input type="number" id="interest_rate" name="interest_rate" placeholder="e.g., 19.99" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="minimum_payment">Minimum Payment:</label>
+                        <input type="number" id="minimum_payment" name="minimum_payment" placeholder="0.00" step="0.01">
+                    </div>
+                    <div class="form-group">
+                        <label for="creditor">Creditor:</label>
+                        <input type="text" id="creditor" name="creditor" placeholder="e.g., Example Bank">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="account_number">Account Number:</label>
+                        <input type="text" id="account_number" name="account_number" placeholder="Last 4 digits">
+                    </div>
+                    <div class="form-group">
+                        <label for="payment_match">Auto-link descriptions:</label>
+                        <input type="text" id="payment_match" name="payment_match" placeholder="e.g., Car Payment">
+                        <small style="color:#6c757d;">Comma-separated ledger descriptions that auto-link as payments.</small>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="notes">Notes:</label>
+                        <textarea id="notes" name="notes" placeholder="Additional notes..."></textarea>
+                    </div>
+                </div>
+                <div class="form-row" id="deferment-row" style="display: none;">
+                    <div class="form-group">
+                        <label for="deferment_end_date">Deferment End Date:</label>
+                        <input type="date" id="deferment_end_date" name="deferment_end_date">
+                    </div>
+                    <div class="form-group">
+                        <label for="subsidized" style="display: block; margin-bottom: 0.5rem;">Subsidized:</label>
+                        <label style="font-weight: normal; display: flex; align-items: center; gap: 0.5rem;">
+                            <input type="checkbox" id="subsidized" name="subsidized" value="1">
+                            No interest accrues during deferment
+                        </label>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit">Add Debt</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Standalone Debts Table -->
+    {% if debts %}
+    <div class="asset-section">
+        <h2>Standalone Debts</h2>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Balance</th>
+                    <th>Principal Paid</th>
+                    <th>Rate</th>
+                    <th>Min Payment</th>
+                    <th>Creditor</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for debt in debts %}
+                <tr>
+                    <td data-label="Name"><a href="{{ url_for('debt_detail', debt_id=debt._id) }}">{{ debt.name }}</a></td>
+                    <td data-label="Type">{{ debt.debt_type|replace('_', ' ')|title }}</td>
+                    <td data-label="Balance" class="negative-balance">
+                        ${{ "%.2f"|format(debt.current_balance) }}
+                        {% if debt.principal_paid %}
+                        <span style="color:#6c757d;font-size:0.8em;white-space:nowrap;">of ${{ "%.2f"|format(debt.starting_balance) }}</span>
+                        {% endif %}
+                        {% if debt.deferment_end_date %}
+                        <span style="background: #ffc107; color: #333; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75em; margin-left: 0.3rem; white-space: nowrap;" title="Deferred until {{ debt.deferment_end_date.strftime('%b %d, %Y') }}{% if debt.subsidized %} (Subsidized){% endif %}">Deferred</span>
+                        {% endif %}
+                    </td>
+                    <td data-label="Principal Paid">${{ "%.2f"|format(debt.principal_paid) }}</td>
+                    <td data-label="Rate">{{ "%.2f"|format(debt.interest_rate) }}%</td>
+                    <td data-label="Min Payment">${{ "%.2f"|format(debt.minimum_payment) }}</td>
+                    <td data-label="Creditor">{{ debt.creditor or '-' }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('debt_detail', debt_id=debt._id) }}" class="action-btn verify-btn">Payments</a>
+                        {% if debt.current_balance and debt.minimum_payment %}
+                        <a href="{{ url_for('debt_payoff_schedule', debt_id=debt._id) }}" class="action-btn verify-btn">Payoff</a>
+                        {% endif %}
+                        <a href="{{ url_for('edit_debt', debt_id=debt._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_debt', debt_id=debt._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this debt?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Payment Plans (no-interest installments charged to a CC) -->
+    <div class="asset-section">
+        <h2>Payment Plans</h2>
+        <p style="color:#6c757d; margin-top:-0.25rem;">No-interest installment plans charged to a credit card (e.g., medical bills). Link CC transactions from the Credit Cards page to track progress.</p>
+
+        <div class="data-entry" style="margin-bottom:1rem;">
+            <div class="transfer-header" id="add-plan-toggle">
+                <h3 style="margin:0;">Add Payment Plan</h3>
+                <span class="toggle-icon">&#9660;</span>
+            </div>
+            <div id="add-plan-body" style="display:none;">
+                <form method="POST" action="{{ url_for('add_payment_plan') }}" class="budget-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pp_vendor">Vendor:</label>
+                            <input type="text" id="pp_vendor" name="vendor" placeholder="e.g., St. Mary Hospital" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pp_original">Original Amount:</label>
+                            <input type="number" id="pp_original" name="original_amount" step="0.01" min="0.01" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="pp_monthly">Monthly Payment:</label>
+                            <input type="number" id="pp_monthly" name="monthly_payment" step="0.01" min="0.01" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="pp_start">Start Date:</label>
+                            <input type="date" id="pp_start" name="start_date">
+                        </div>
+                        <div class="form-group">
+                            <label for="pp_card">Credit Card:</label>
+                            <select id="pp_card" name="card_name">
+                                <option value="">— Any —</option>
+                                {% for c in cc_card_names %}
+                                <option value="{{ c }}">{{ c }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="pp_category">Category:</label>
+                            <select id="pp_category" name="category">
+                                <option value="">— None —</option>
+                                {% for cat in categories %}
+                                <option value="{{ cat }}">{{ cat }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group full-width">
+                            <label for="pp_notes">Notes:</label>
+                            <textarea id="pp_notes" name="notes"></textarea>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit">Add Plan</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if payment_plans %}
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Vendor</th>
+                    <th>Card</th>
+                    <th>Monthly</th>
+                    <th>Progress</th>
+                    <th>Remaining</th>
+                    <th>Payments Left</th>
+                    <th>Est. Ends</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in payment_plans %}
+                <tr {% if p.status == 'closed' %}style="opacity:0.6;"{% endif %}>
+                    <td data-label="Vendor">
+                        <a href="{{ url_for('payment_plan_detail', plan_id=p._id) }}">{{ p.vendor }}</a>
+                        {% if p.status == 'closed' %}<span style="background:#28a745;color:#fff;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.75em;margin-left:0.3rem;">Closed</span>{% endif %}
+                    </td>
+                    <td data-label="Card">{{ p.card_name or '—' }}</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(p.monthly_payment) }}</td>
+                    <td data-label="Progress">
+                        <div style="background:#e9ecef;border-radius:4px;height:18px;width:140px;overflow:hidden;display:inline-block;vertical-align:middle;">
+                            <div style="background:#28a745;height:100%;width:{{ '%.0f'|format(p.progress_pct) }}%;"></div>
+                        </div>
+                        <span style="margin-left:0.5rem;font-size:0.85em;color:#495057;">{{ p.payments_made }}/{{ p.num_payments }}</span>
+                    </td>
+                    <td data-label="Remaining" class="negative-balance">${{ "%.2f"|format(p.remaining) }}</td>
+                    <td data-label="Payments Left">{{ p.payments_remaining }}</td>
+                    <td data-label="Est. Ends">{{ p.end_date_estimate.strftime('%b %Y') if p.end_date_estimate else '—' }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('payment_plan_detail', plan_id=p._id) }}" class="action-btn edit-btn">View</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_payment_plan', plan_id=p._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this payment plan? Linked transactions will be unlinked.')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state" style="margin-bottom:1rem;">
+            <p>No payment plans yet.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Asset Liabilities (mortgage, car, etc.) -->
+    {% if asset_liabilities %}
+    <div class="asset-section">
+        <h2>Asset Liabilities</h2>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th>Liability Type</th>
+                    <th>Balance</th>
+                    <th>Principal Paid</th>
+                    <th>Rate</th>
+                    <th>Monthly Payment</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in asset_liabilities %}
+                <tr>
+                    <td data-label="Asset"><a href="{{ url_for('asset_liability_detail', asset_id=asset._id) }}">{{ asset.name }}</a></td>
+                    <td data-label="Type">{{ (asset.liability_type or 'other')|replace('_', ' ')|title }}</td>
+                    <td data-label="Balance" class="negative-balance">
+                        ${{ "%.2f"|format(asset.liability_current_balance) }}
+                        {% if asset.principal_paid %}
+                        <span style="color:#6c757d;font-size:0.8em;white-space:nowrap;">of ${{ "%.2f"|format(asset.liability_starting_balance) }}</span>
+                        {% endif %}
+                    </td>
+                    <td data-label="Principal Paid">${{ "%.2f"|format(asset.principal_paid) }}</td>
+                    <td data-label="Rate">{{ "%.2f"|format(asset.interest_rate or 0) }}%</td>
+                    <td data-label="Monthly Payment">${{ "%.2f"|format(asset.monthly_payment or 0) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('asset_liability_detail', asset_id=asset._id) }}" class="action-btn verify-btn">Payments</a>
+                        <a href="{{ url_for('edit_asset', asset_id=asset._id) }}" class="action-btn edit-btn">Edit Asset</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Paid Off (archived): the ledger shows these at $0; their budget lines are archived -->
+    {% if paid_off_debts or paid_off_assets %}
+    <details class="asset-section">
+        <summary><h2 style="display:inline;">Paid Off ({{ (paid_off_debts|length) + (paid_off_assets|length) }})</h2></summary>
+        <p style="color:#6c757d;font-size:0.9em;">Their budget lines are archived and no longer projected. If a balance reopens (a payment is unlinked or edited), the loan and its budget line come back automatically.</p>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Original Balance</th>
+                    <th>Total Paid</th>
+                    <th>Paid Off</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for debt in paid_off_debts %}
+                <tr>
+                    <td data-label="Name"><a href="{{ url_for('debt_detail', debt_id=debt._id) }}">{{ debt.name }}</a></td>
+                    <td data-label="Original Balance">${{ "%.2f"|format(debt.starting_balance) }}</td>
+                    <td data-label="Total Paid">${{ "%.2f"|format(debt.paid) }}</td>
+                    <td data-label="Paid Off">{{ debt.paid_off_date.strftime('%b %d, %Y') if debt.paid_off_date else '—' }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('debt_detail', debt_id=debt._id) }}" class="action-btn verify-btn">Payments</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_debt', debt_id=debt._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this debt?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% for asset in paid_off_assets %}
+                <tr>
+                    <td data-label="Name"><a href="{{ url_for('asset_liability_detail', asset_id=asset._id) }}">{{ asset.name }} (Loan)</a></td>
+                    <td data-label="Original Balance">${{ "%.2f"|format(asset.liability_starting_balance) }}</td>
+                    <td data-label="Total Paid">${{ "%.2f"|format(asset.paid) }}</td>
+                    <td data-label="Paid Off">{{ asset.liability_paid_off_date.strftime('%b %d, %Y') if asset.liability_paid_off_date else '—' }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('asset_liability_detail', asset_id=asset._id) }}" class="action-btn verify-btn">Payments</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+
+    {% if not debts and not asset_liabilities and not paid_off_debts and not paid_off_assets %}
+    <div class="empty-state">
+        <p>No debts tracked yet. Add your first debt above to start planning your payoff strategy.</p>
+    </div>
+    {% endif %}
+
+    <script>
+        // Toggle add debt form
+        const addDebtToggle = document.getElementById('add-debt-toggle');
+        const addDebtBody = document.getElementById('add-debt-body');
+        if (addDebtToggle && addDebtBody) {
+            addDebtToggle.addEventListener('click', () => {
+                const isOpen = addDebtBody.style.display !== 'none';
+                addDebtBody.style.display = isOpen ? 'none' : 'block';
+                addDebtToggle.classList.toggle('open', !isOpen);
+            });
+        }
+
+        // Toggle add payment plan form
+        const addPlanToggle = document.getElementById('add-plan-toggle');
+        const addPlanBody = document.getElementById('add-plan-body');
+        if (addPlanToggle && addPlanBody) {
+            addPlanToggle.addEventListener('click', () => {
+                const isOpen = addPlanBody.style.display !== 'none';
+                addPlanBody.style.display = isOpen ? 'none' : 'block';
+                addPlanToggle.classList.toggle('open', !isOpen);
+            });
+        }
+
+        // Toggle deferment fields for student loans
+        const debtTypeSelect = document.getElementById('debt_type');
+        const defermentRow = document.getElementById('deferment-row');
+        if (debtTypeSelect && defermentRow) {
+            function toggleDefermentFields() {
+                defermentRow.style.display = debtTypeSelect.value === 'student_loan' ? 'flex' : 'none';
+            }
+            debtTypeSelect.addEventListener('change', toggleDefermentFields);
+            toggleDefermentFields();
+        }
+
+        // Payoff plan — disable manual extra input when "use surplus" is on
+        const autoExtra = document.getElementById('auto-extra');
+        const extraInput = document.getElementById('extra-input');
+        if (autoExtra && extraInput) {
+            function syncExtra() {
+                extraInput.disabled = autoExtra.checked;
+                extraInput.style.opacity = autoExtra.checked ? '0.5' : '1';
+            }
+            autoExtra.addEventListener('change', syncExtra);
+            syncExtra();
+        }
+
+        // Payoff calculator
+        const calculateBtn = document.getElementById('calculate-btn');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+
+        calculateBtn.addEventListener('click', async () => {
+            const extraPayment = parseFloat(document.getElementById('extra-payment').value) || 0;
+            calculateBtn.textContent = 'Calculating...';
+            calculateBtn.disabled = true;
+
+            try {
+                const response = await fetch('{{ url_for("calculate_payoff") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                    body: JSON.stringify({ extra_payment: extraPayment })
+                });
+
+                const data = await response.json();
+                const resultsDiv = document.getElementById('payoff-results');
+                resultsDiv.style.display = 'grid';
+
+                // Avalanche
+                document.getElementById('avalanche-months').textContent = data.avalanche.total_months;
+                document.getElementById('avalanche-interest').textContent = '$' + data.avalanche.total_interest.toFixed(2);
+                const avalancheDebts = document.getElementById('avalanche-debts');
+                avalancheDebts.innerHTML = data.avalanche.debts.map(d =>
+                    `<div style="display:flex; justify-content:space-between; padding:0.25rem 0; border-bottom:1px solid #eee;">
+                        <span>${d.name}</span><span>${d.months} mo</span>
+                    </div>`
+                ).join('');
+
+                // Snowball
+                document.getElementById('snowball-months').textContent = data.snowball.total_months;
+                document.getElementById('snowball-interest').textContent = '$' + data.snowball.total_interest.toFixed(2);
+                const snowballDebts = document.getElementById('snowball-debts');
+                snowballDebts.innerHTML = data.snowball.debts.map(d =>
+                    `<div style="display:flex; justify-content:space-between; padding:0.25rem 0; border-bottom:1px solid #eee;">
+                        <span>${d.name}</span><span>${d.months} mo</span>
+                    </div>`
+                ).join('');
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to calculate payoff plan');
+            } finally {
+                calculateBtn.textContent = 'Calculate';
+                calculateBtn.disabled = false;
+            }
+        });
+    </script>
+{% endblock %}

@@ -1,0 +1,90 @@
+# The web app. ONE replica by default: the app keeps a price cache, report-job
+# state and scheduler threads in process memory. If you run more than one,
+# SECRET_KEY must be shared (it is, via the Secret), the statements volume
+# must be ReadWriteMany, and each replica runs its own background threads.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cc-statements
+  namespace: accounting
+spec:
+  accessModes: ["ReadWriteOnce"]   # use ReadWriteMany (e.g. NFS) for >1 replica
+  # storageClassName: your-storage-class
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: accounting
+  namespace: accounting
+  labels:
+    app: accounting
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate   # RWO volume; switch to RollingUpdate with an RWX volume
+  selector:
+    matchLabels:
+      app: accounting
+  template:
+    metadata:
+      labels:
+        app: accounting
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+      - name: accounting
+        # Build and push the image yourself (see docs/deployment.md), or use the
+        # image published by this repo's CI if you enable that.
+        image: ghcr.io/your-user/accounting-cloud:latest
+        ports:
+        - containerPort: 5000
+          name: http
+        envFrom:
+        - configMapRef:
+            name: accounting-config
+        env:
+        - name: SECRET_KEY
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: SECRET_KEY}}
+        - name: ALPHA_VANTAGE_KEY
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: ALPHA_VANTAGE_KEY, optional: true}}
+        - name: OLLAMA_API_KEY
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: OLLAMA_API_KEY, optional: true}}
+        volumeMounts:
+        - name: cc-statements
+          mountPath: /app/data/cc_statements
+        resources:
+          requests: {memory: "192Mi", cpu: "50m"}
+          limits: {memory: "512Mi"}
+        # If APPLICATION_ROOT is a sub-path, prefix these paths with it.
+        readinessProbe:
+          httpGet: {path: /health, port: http}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: {path: /health, port: http}
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 3
+      volumes:
+      - name: cc-statements
+        persistentVolumeClaim:
+          claimName: cc-statements
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: accounting
+  namespace: accounting
+spec:
+  selector:
+    app: accounting
+  ports:
+  - port: 5000
+    targetPort: http
+    name: http

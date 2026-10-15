@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Edit Budget Item</h1>
+
+    <div class="data-entry">
+        <form method="POST" action="{{ url_for('edit_budget_item', item_id=item._id) }}" class="budget-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <input type="text" id="description" name="description" value="{{ item.description }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount:</label>
+                    <input type="number" id="amount" name="amount" value="{{ item.amount }}" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label for="transaction_type">Type:</label>
+                    <select id="transaction_type" name="transaction_type" onchange="updateCategories(this.value)">
+                        <option value="expense" {{ 'selected' if item.transaction_type == 'expense' else '' }}>Expense</option>
+                        <option value="income" {{ 'selected' if item.transaction_type == 'income' else '' }}>Income</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category:</label>
+                    <select id="category" name="category">
+                        {% if item.transaction_type == 'income' %}
+                            {% for cat in income_categories %}
+                            <option value="{{ cat }}" {{ 'selected' if item.category == cat else '' }}>{{ cat }}</option>
+                            {% endfor %}
+                        {% else %}
+                            {% for cat in categories %}
+                            <option value="{{ cat }}" {{ 'selected' if item.category == cat else '' }}>{{ cat }}</option>
+                            {% endfor %}
+                        {% endif %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="frequency">Frequency:</label>
+                    <select id="frequency" name="frequency">
+                        <option value="weekly" {{ 'selected' if item.frequency == 'weekly' else '' }}>Weekly</option>
+                        <option value="biweekly" {{ 'selected' if item.frequency == 'biweekly' else '' }}>Bi-Weekly (every 14 days)</option>
+                        <option value="monthly" {{ 'selected' if item.frequency == 'monthly' else '' }}>Monthly</option>
+                        <option value="bi-monthly" {{ 'selected' if item.frequency == 'bi-monthly' else '' }}>Bi-Monthly</option>
+                        <option value="yearly" {{ 'selected' if item.frequency == 'yearly' else '' }}>Yearly</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="day_of_month">Day(s) of Month:</label>
+                    <input type="text" id="day_of_month" name="day_of_month" value="{{ item.day_of_month or '' }}" placeholder="e.g., 1 or 1,15">
+                </div>
+                <div class="form-group">
+                    <label for="start_date">Start Date:</label>
+                    <input type="date" id="start_date" name="start_date" value="{{ item.start_date }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_date">End Date:</label>
+                    <input type="date" id="end_date" name="end_date" value="{{ item.end_date or '' }}">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="account_id">Account:</label>
+                    <select id="account_id" name="account_id">
+                        <option value="">-- Default (Primary) --</option>
+                        {% for acc in accounts %}
+                        <option value="{{ acc._id }}" {{ 'selected' if item.account_id and item.account_id == acc._id|string else '' }}>{{ acc.name }}{% if acc.is_primary %} (Primary){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="payment_method">Payment Method:</label>
+                    <input type="text" id="payment_method" name="payment_method" value="{{ item.payment_method or '' }}" placeholder="e.g., Main Checking">
+                </div>
+                <div class="form-group">
+                    <label for="account_number">Account #:</label>
+                    <input type="text" id="account_number" name="account_number" value="{{ item.account_number or '' }}" placeholder="Last 4 digits">
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="auto_pay" name="auto_pay" {{ 'checked' if item.auto_pay else '' }}>
+                        Auto-Pay Enabled
+                    </label>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="notes">Notes:</label>
+                    <textarea id="notes" name="notes" placeholder="Additional notes...">{{ item.notes or '' }}</textarea>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit">Save Changes</button>
+                <a href="{{ url_for('budget_page') }}" class="cancel-btn">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        const expenseCategories = {{ categories | tojson }};
+        const incomeCategories = {{ income_categories | tojson }};
+        const currentCategory = "{{ item.category or '' }}";
+
+        function updateCategories(type) {
+            const select = document.getElementById('category');
+            const categories = type === 'income' ? incomeCategories : expenseCategories;
+            select.innerHTML = categories.map(cat =>
+                `<option value="${cat}" ${cat === currentCategory ? 'selected' : ''}>${cat}</option>`
+            ).join('');
+        }
+    </script>
+{% endblock %}

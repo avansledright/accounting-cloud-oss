@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Net Worth Tracker</h1>
+
+    <!-- Current Summary -->
+    <div class="summary-cards">
+        <div class="summary-card income">
+            <span class="summary-label">Total Assets</span>
+            <span class="summary-amount">${{ "%.2f"|format(current_assets) }}</span>
+        </div>
+        <div class="summary-card expenses">
+            <span class="summary-label">Total Liabilities</span>
+            <span class="summary-amount">${{ "%.2f"|format(current_liabilities) }}</span>
+        </div>
+        <div class="summary-card {{ 'positive' if current_net_worth >= 0 else 'negative' }}">
+            <span class="summary-label">Net Worth</span>
+            <span class="summary-amount">${{ "%.2f"|format(current_net_worth) }}</span>
+        </div>
+    </div>
+
+    <!-- Take Snapshot Button -->
+    <div class="data-entry">
+        <div class="snapshot-section">
+            <h2>Record Snapshot</h2>
+            <p>Take a snapshot of your current net worth to track progress over time.</p>
+            <form method="POST" action="{{ url_for('take_networth_snapshot') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="action-btn update-btn">Take Snapshot Now</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Net Worth Chart -->
+    <div class="data-entry">
+        <h2>Net Worth Over Time</h2>
+        <div class="chart-container">
+            <canvas id="networthChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Historical Snapshots Table -->
+    {% if snapshots %}
+    <div class="data-entry">
+        <h2>Snapshot History</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Total Assets</th>
+                    <th>Total Liabilities</th>
+                    <th>Net Worth</th>
+                    <th>Change</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for snapshot in snapshots %}
+                <tr>
+                    <td data-label="Date">{{ snapshot.date }}</td>
+                    <td data-label="Total Assets" class="positive-amount">${{ "%.2f"|format(snapshot.total_assets) }}</td>
+                    <td data-label="Total Liabilities" class="negative-balance">${{ "%.2f"|format(snapshot.total_liabilities) }}</td>
+                    <td data-label="Net Worth" class="{{ 'positive-amount' if snapshot.net_worth >= 0 else 'negative-balance' }}">${{ "%.2f"|format(snapshot.net_worth) }}</td>
+                    <td data-label="Change">
+                        {% if not loop.last %}
+                            {% set prev = snapshots[loop.index] %}
+                            {% set change = snapshot.net_worth - prev.net_worth %}
+                            <span class="{{ 'positive-amount' if change >= 0 else 'negative-balance' }}">
+                                {{ '+' if change >= 0 else '' }}${{ "%.2f"|format(change) }}
+                            </span>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Projected Net Worth -->
+    {% if nw_projection %}
+    <div class="data-entry">
+        <h2>Projected Net Worth (24 Months)</h2>
+        <div class="chart-container">
+            <canvas id="nwProjectionChart"></canvas>
+        </div>
+    </div>
+    {% endif %}
+
+    <script>
+        // Fetch data and render historical chart
+        fetch('{{ url_for("networth_history_api") }}')
+            .then(response => response.json())
+            .then(data => {
+                if (data.length === 0) return;
+
+                const ctx = document.getElementById('networthChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: data.map(d => d.date),
+                        datasets: [{
+                            label: 'Net Worth',
+                            data: data.map(d => d.net_worth),
+                            borderColor: '#007bff',
+                            backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }, {
+                            label: 'Total Assets',
+                            data: data.map(d => d.total_assets),
+                            borderColor: '#28a745',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3
+                        }, {
+                            label: 'Total Liabilities',
+                            data: data.map(d => d.total_liabilities),
+                            borderColor: '#dc3545',
+                            backgroundColor: 'transparent',
+                            borderDash: [5, 5],
+                            tension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': $' + context.parsed.y.toLocaleString();
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                ticks: {
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+
+        // Projected net worth chart
+        {% if nw_projection %}
+        const projData = [
+            {% for p in nw_projection %}
+            { month: "{{ p.month }}", value: {{ p.projected_net_worth }} }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+
+        if (projData.length > 0) {
+            const projCtx = document.getElementById('nwProjectionChart');
+            if (projCtx) {
+                new Chart(projCtx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: projData.map(d => d.month),
+                        datasets: [{
+                            label: 'Projected Net Worth',
+                            data: projData.map(d => d.value),
+                            borderColor: '#6f42c1',
+                            backgroundColor: 'rgba(111, 66, 193, 0.1)',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return 'Projected: $' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2});
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                ticks: {
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        {% endif %}
+    </script>
+{% endblock %}

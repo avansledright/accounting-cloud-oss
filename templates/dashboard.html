@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1 style="margin-bottom:0.25rem;">Dashboard</h1>
+<p style="color:#6c757d; margin-top:0;">{{ today.strftime('%A, %B %d, %Y') }}</p>
+
+{% if cashflow_warnings %}
+<div style="background:#fff3cd; border:1px solid #ffc107; border-radius:6px; padding:0.75rem 1rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+    <div>
+        <strong style="color:#856404;">&#9888; Cash flow warning</strong>
+        <span style="color:#856404;">— {{ cashflow_warnings|length }} upcoming month{{ 's' if cashflow_warnings|length != 1 else '' }} dip{{ 's' if cashflow_warnings|length == 1 else '' }} negative on {{ primary_name or 'primary' }}.</span>
+    </div>
+    <a href="{{ url_for('ledger_page') }}" class="action-btn verify-btn" style="height:auto;padding:0.4rem 0.9rem;min-width:auto;">View ledger</a>
+</div>
+{% endif %}
+
+<!-- Top-line cards -->
+<div class="summary-cards" style="margin-bottom:1.5rem;">
+    <div class="summary-card">
+        <span class="summary-label">{{ primary_name or 'Primary' }}</span>
+        <span class="summary-amount {{ 'negative-balance' if primary_balance < 0 else '' }}">${{ "%.2f"|format(primary_balance) }}</span>
+        <span style="color:#6c757d; font-size:0.8rem;">End of month: <span class="{{ 'negative-balance' if next_month_end < 0 else '' }}">${{ "%.2f"|format(next_month_end) }}</span></span>
+    </div>
+    <div class="summary-card investments">
+        <span class="summary-label">Net Worth</span>
+        <span class="summary-amount">${{ "{:,.0f}".format(current_net_worth) }}</span>
+        {% if nw_delta is not none %}
+        <span style="font-size:0.85rem; color:{{ '#28a745' if nw_delta >= 0 else '#dc3545' }};">
+            {{ '+' if nw_delta >= 0 else '' }}${{ "{:,.0f}".format(nw_delta) }} (30d)
+        </span>
+        {% endif %}
+    </div>
+    <div class="summary-card">
+        <span class="summary-label">Cash</span>
+        <span class="summary-amount">${{ "{:,.0f}".format(cash_total) }}</span>
+        <span style="color:#6c757d; font-size:0.8rem;">checking + savings</span>
+    </div>
+    <div class="summary-card investments">
+        <span class="summary-label">Investments</span>
+        <span class="summary-amount">${{ "{:,.0f}".format(investment_total) }}</span>
+        <span style="color:#6c757d; font-size:0.8rem;"><a href="{{ url_for('portfolio_page') }}">Portfolio &rarr;</a></span>
+    </div>
+    <div class="summary-card negative">
+        <span class="summary-label">Total Debt</span>
+        <span class="summary-amount">${{ "{:,.0f}".format(total_debts) }}</span>
+        <span style="color:#6c757d; font-size:0.8rem;">
+            {% if active_plan_count %}{{ active_plan_count }} payment plan{{ 's' if active_plan_count != 1 else '' }}{% else %}<a href="{{ url_for('debts_page') }}">Manage &rarr;</a>{% endif %}
+        </span>
+    </div>
+</div>
+
+<div id="dashboard-cards">
+    <div class="dash-customize-bar">
+        <span class="spacer"></span>
+        <button type="button" class="dash-btn dash-btn-edit action-btn edit-btn">⚙ Customize</button>
+        <span class="dash-edit-hint">Drag to reorder · drag the right edge to resize · 👁 to show/hide</span>
+        <button type="button" class="dash-btn dash-btn-reset action-btn">Reset</button>
+        <button type="button" class="dash-btn dash-btn-cancel action-btn">Cancel</button>
+        <button type="button" class="dash-btn dash-btn-save action-btn verify-btn">Save layout</button>
+    </div>
+
+    <div class="dashboard-grid">
+        {% for c in dashboard_layout %}
+        <div class="dashboard-card{{ ' is-hidden' if not c.visible else '' }}{{ ' is-empty' if not card_available.get(c.key, True) else '' }}"
+             data-card-key="{{ c.key }}" data-span="{{ c.span }}" style="--span:{{ c.span }};">
+
+            <div class="card-edit-bar">
+                <span class="card-drag-handle" title="Drag to reorder">⠿</span>
+                <span class="card-edit-title">{{ c.title }}</span>
+                <button type="button" class="card-vis-btn" title="Show or hide this card">{{ '🙈' if not c.visible else '👁' }}</button>
+            </div>
+            <div class="card-empty-note">No data to show yet.</div>
+
+            {% if c.key == 'upcoming_bills' %}
+            <div class="dashboard-card-header">
+                <h2>Upcoming Bills · 14 days</h2>
+                <span class="dashboard-card-meta">Total: <strong>${{ "%.2f"|format(upcoming_bills_total) }}</strong></span>
+            </div>
+            {% if upcoming_bills %}
+            <table class="account-table compact">
+                <thead><tr><th>Date</th><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+                <tbody>
+                    {% for b in upcoming_bills %}
+                    <tr>
+                        <td data-label="Date">{{ b.date.strftime('%a %b %d') }}</td>
+                        <td data-label="Description">{{ b.description }}{% if b.category %} <span style="color:#6c757d; font-size:0.85em;">· {{ b.category }}</span>{% endif %}</td>
+                        <td data-label="Amount" style="text-align:right;">${{ "%.2f"|format(b.amount) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color:#6c757d;">No bills scheduled in the next 14 days.</p>
+            {% endif %}
+            <a href="{{ url_for('budget_page') }}" class="dashboard-card-link">Budget &rarr;</a>
+
+            {% elif c.key == 'month_to_date' %}
+            <div class="dashboard-card-header">
+                <h2>Month to Date</h2>
+                <span class="dashboard-card-meta">{{ today.strftime('%B') }}</span>
+            </div>
+            <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                <div>
+                    <div style="color:#6c757d; font-size:0.85rem;">Income</div>
+                    <div style="font-size:1.5rem; font-weight:600; color:#28a745;">${{ "%.2f"|format(mtd_income) }}</div>
+                </div>
+                <div>
+                    <div style="color:#6c757d; font-size:0.85rem;">Spending</div>
+                    <div style="font-size:1.5rem; font-weight:600; color:#dc3545;">${{ "%.2f"|format(mtd_spent) }}</div>
+                </div>
+                <div>
+                    <div style="color:#6c757d; font-size:0.85rem;">Net</div>
+                    <div style="font-size:1.5rem; font-weight:600; {% if (mtd_income - mtd_spent) < 0 %}color:#dc3545;{% else %}color:#28a745;{% endif %}">${{ "%.2f"|format(mtd_income - mtd_spent) }}</div>
+                </div>
+            </div>
+            <a href="{{ url_for('ledger_page') }}" class="dashboard-card-link">Ledger &rarr;</a>
+
+            {% elif c.key == 'payment_plans' %}
+            <div class="dashboard-card-header">
+                <h2>Payment Plans</h2>
+                <span class="dashboard-card-meta">Remaining: <strong>${{ "%.2f"|format(plans_remaining_total) }}</strong></span>
+            </div>
+            {% for p in top_plans %}
+            <div style="margin-bottom:0.75rem;">
+                <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:0.25rem;">
+                    <a href="{{ url_for('payment_plan_detail', plan_id=p._id) }}">{{ p.vendor }}</a>
+                    <span style="color:#6c757d;">{{ p.payments_made }}/{{ p.num_payments }} · ${{ "%.2f"|format(p.remaining) }} left</span>
+                </div>
+                <div style="background:#e9ecef; border-radius:4px; height:8px; overflow:hidden;">
+                    <div style="background:#28a745; height:100%; width:{{ '%.0f'|format(p.progress_pct) }}%;"></div>
+                </div>
+            </div>
+            {% endfor %}
+            <a href="{{ url_for('debts_page') }}" class="dashboard-card-link">All debts &rarr;</a>
+
+            {% elif c.key == 'outlook' %}
+            <div class="dashboard-card-header">
+                <h2>Next 3 Months</h2>
+                <span class="dashboard-card-meta">{{ primary_name or 'primary' }}</span>
+            </div>
+            <table class="account-table compact">
+                <thead><tr><th>Month</th><th style="text-align:right;">End Balance</th><th style="text-align:right;">Low Point</th></tr></thead>
+                <tbody>
+                    {% for m in upcoming_outlook %}
+                    <tr>
+                        <td data-label="Month">{{ m.month }}</td>
+                        <td data-label="End Balance" style="text-align:right;" class="{{ 'negative-balance' if m.balance < 0 else 'positive-amount' }}">${{ "%.2f"|format(m.balance) }}</td>
+                        <td data-label="Low Point" style="text-align:right;" class="{{ 'negative-balance' if m.min_balance < 0 else '' }}">
+                            {% if m.min_balance < 0 %}&#9888; {% endif %}${{ "%.2f"|format(m.min_balance) }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <a href="{{ url_for('ledger_page') }}" class="dashboard-card-link">Full ledger &rarr;</a>
+
+            {% elif c.key == 'goals' %}
+            <div class="dashboard-card-header">
+                <h2>Savings Goals</h2>
+            </div>
+            {% for g in top_goals %}
+            <div style="margin-bottom:0.75rem;">
+                <div style="display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:0.25rem;">
+                    <span>{{ g.name }}</span>
+                    <span style="color:#6c757d;">${{ "{:,.0f}".format(g.current_amount or 0) }} / ${{ "{:,.0f}".format(g.target_amount or 0) }}</span>
+                </div>
+                <div style="background:#e9ecef; border-radius:4px; height:8px; overflow:hidden;">
+                    <div style="background:#17a2b8; height:100%; width:{{ '%.0f'|format(g.progress_pct if g.progress_pct < 100 else 100) }}%;"></div>
+                </div>
+                {% if g.plan %}
+                <div style="font-size:0.78rem; color:#6c757d; margin-top:0.25rem;">
+                    {{ g.plan.strategy_label }} · next {{ g.plan.target_name }}{% if g.plan.debtfree_label %} · free ~{{ g.plan.debtfree_label }}{% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            <a href="{{ url_for('goals_page') }}" class="dashboard-card-link">All goals &rarr;</a>
+
+            {% elif c.key == 'advisor_brief' %}
+            <div class="dashboard-card-header">
+                <h2>Latest Advisor Brief</h2>
+                {% if latest_brief %}
+                <span class="dashboard-card-meta">{{ latest_brief.type|title }}{% if latest_brief.date_str %} · {{ latest_brief.date_str }}{% endif %}</span>
+                {% endif %}
+            </div>
+            {% if latest_brief %}
+            <p style="color:#495057; line-height:1.5;">{{ latest_brief.snippet }}</p>
+            <a href="{{ url_for('reports_page') }}" class="dashboard-card-link">Read full brief &rarr;</a>
+            {% endif %}
+
+            {% elif c.key == 'benefit_alerts' %}
+            <div class="dashboard-card-header">
+                <h2>Tax Year &amp; Perks</h2>
+                <span class="dashboard-card-meta">{{ today.year }}</span>
+            </div>
+            {% if benefit_alerts %}
+            <ul class="bn-dash-list">
+                {% for a in benefit_alerts %}
+                <li class="bn-{{ a.severity }}">
+                    <strong>{{ a.title }}</strong>
+                    <small>{{ a.detail }}</small>
+                </li>
+                {% endfor %}
+            </ul>
+            <a href="{{ url_for('benefits_page') }}" class="dashboard-card-link">Contribution room &amp; credits &rarr;</a>
+            {% endif %}
+            {% endif %}
+
+            <span class="card-resize-handle" title="Drag to resize"></span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+(function() {
+    const root = document.getElementById('dashboard-cards');
+    if (!root) return;
+    const grid = root.querySelector('.dashboard-grid');
+    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    const btn = sel => root.querySelector(sel);
+    let snapshot = null;
+
+    const cards = () => Array.from(grid.querySelectorAll('.dashboard-card'));
+
+    function enterEdit() {
+        snapshot = grid.innerHTML;
+        root.classList.add('editing');
+        cards().forEach(c => c.setAttribute('draggable', 'true'));
+    }
+    function exitEdit() {
+        root.classList.remove('editing');
+        cards().forEach(c => c.removeAttribute('draggable'));
+    }
+    function cancel() {
+        if (snapshot !== null) grid.innerHTML = snapshot;
+        exitEdit();
+    }
+
+    btn('.dash-btn-edit').addEventListener('click', enterEdit);
+    btn('.dash-btn-cancel').addEventListener('click', cancel);
+
+    // Show/hide toggle + block navigation while editing
+    grid.addEventListener('click', e => {
+        if (!root.classList.contains('editing')) return;
+        const vis = e.target.closest('.card-vis-btn');
+        if (vis) {
+            e.preventDefault();
+            const card = vis.closest('.dashboard-card');
+            const hidden = card.classList.toggle('is-hidden');
+            vis.textContent = hidden ? '🙈' : '👁';
+            return;
+        }
+        const a = e.target.closest('a');
+        if (a) e.preventDefault();
+    });
+
+    // Drag to reorder (native DnD)
+    let dragEl = null;
+    grid.addEventListener('dragstart', e => {
+        if (!root.classList.contains('editing')) return;
+        // Don't start a card drag when grabbing the resize handle
+        if (e.target.closest('.card-resize-handle') || rz) { e.preventDefault(); return; }
+        dragEl = e.target.closest('.dashboard-card');
+        if (dragEl) { dragEl.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+    });
+    grid.addEventListener('dragend', () => {
+        if (dragEl) dragEl.classList.remove('dragging');
+        cards().forEach(c => c.classList.remove('drop-target'));
+        dragEl = null;
+    });
+    grid.addEventListener('dragover', e => {
+        if (!dragEl) return;
+        e.preventDefault();
+        const over = e.target.closest('.dashboard-card');
+        if (!over || over === dragEl) return;
+        const rect = over.getBoundingClientRect();
+        const after = (e.clientX - rect.left) > rect.width / 2;
+        cards().forEach(c => c.classList.remove('drop-target'));
+        over.classList.add('drop-target');
+        grid.insertBefore(dragEl, after ? over.nextSibling : over);
+    });
+
+    // Drag right edge to resize (1–4 column slots)
+    let rz = null;
+    grid.addEventListener('pointerdown', e => {
+        const handle = e.target.closest('.card-resize-handle');
+        if (!handle || !root.classList.contains('editing')) return;
+        e.preventDefault();
+        const card = handle.closest('.dashboard-card');
+        rz = { card, startX: e.clientX, startSpan: parseInt(card.dataset.span) || 2,
+               slot: grid.clientWidth / 4 };
+        document.body.style.userSelect = 'none';
+    });
+    window.addEventListener('pointermove', e => {
+        if (!rz) return;
+        const delta = Math.round((e.clientX - rz.startX) / rz.slot);
+        const span = Math.max(1, Math.min(4, rz.startSpan + delta));
+        rz.card.dataset.span = span;
+        rz.card.style.setProperty('--span', span);
+    });
+    window.addEventListener('pointerup', () => {
+        if (!rz) return;
+        rz = null;
+        document.body.style.userSelect = '';
+    });
+
+    async function post(payload) {
+        const res = await fetch('{{ url_for("save_dashboard_layout") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf },
+            body: JSON.stringify(payload),
+        });
+        return res.ok;
+    }
+
+    btn('.dash-btn-save').addEventListener('click', async () => {
+        const payload = { cards: cards().map(c => ({
+            key: c.dataset.cardKey,
+            span: parseInt(c.dataset.span) || 2,
+            visible: !c.classList.contains('is-hidden'),
+        })) };
+        if (await post(payload)) location.reload();
+        else alert('Could not save the dashboard layout.');
+    });
+
+    btn('.dash-btn-reset').addEventListener('click', async () => {
+        if (!confirm('Reset the dashboard to its default layout?')) return;
+        if (await post({ reset: true })) location.reload();
+        else alert('Could not reset the dashboard layout.');
+    });
+})();
+</script>
+{% endblock %}

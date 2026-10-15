@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Edit Transaction</h1>
+
+    <div class="data-entry">
+        <form method="POST" action="{{ url_for('edit_transaction', transaction_id=transaction._id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label for="description">Description:</label>
+                <input type="text" id="description" name="description" value="{{ transaction.description }}" required>
+            </div>
+            <div class="form-group">
+                <label for="amount">Amount:</label>
+                <input type="number" id="amount" name="amount" value="{{ transaction.amount }}" step="0.01" required>
+            </div>
+            <div class="form-group">
+                <label for="date">Date:</label>
+                <input type="date" id="date" name="date" value="{{ transaction.date }}" required>
+            </div>
+            <div class="form-group">
+                <label for="transaction_type">Type:</label>
+                <select id="transaction_type" name="transaction_type">
+                    <option value="expense" {% if transaction.transaction_type == 'expense' %}selected{% endif %}>Expense</option>
+                    <option value="income" {% if transaction.transaction_type == 'income' %}selected{% endif %}>Income</option>
+                </select>
+            </div>
+            <button type="submit">Update Transaction</button>
+        </form>
+    </div>
+{% endblock %}

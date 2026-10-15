@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / Run Payroll</div>
+    <h1>Run Payroll</h1>
+
+    {% if not employees %}
+    <p>No active employees. <a href="{{ url_for('payroll_employee_form') }}">Add one</a> first.</p>
+    {% else %}
+    <form method="POST" class="data-entry" id="payroll-run-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Employee *</label>
+                <select name="employee_id" id="employee_id" required>
+                    <option value="">—</option>
+                    {% for emp in employees %}
+                    <option value="{{ emp._id }}"
+                            data-rate="{{ emp.pay_rate or 0 }}"
+                            data-pay-type="{{ emp.pay_type }}"
+                            data-funding="{{ emp.funding_account_id or '' }}">
+                        {{ emp.name }} — ${{ "%.2f"|format(emp.pay_rate or 0) }}/{% if emp.pay_type == 'hourly' %}hr{% else %}period{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Pay Date *</label>
+                <input type="date" name="pay_date" id="pay_date" value="{{ today }}" required>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Period Start *</label>
+                <input type="date" name="period_start" id="period_start" required>
+            </div>
+            <div class="form-group">
+                <label>Period End *</label>
+                <input type="date" name="period_end" id="period_end" required>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Hours (hourly only)</label>
+                <input type="number" step="0.01" name="hours" id="hours">
+            </div>
+            <div class="form-group">
+                <label>Rate</label>
+                <input type="number" step="0.01" name="rate" id="rate">
+            </div>
+            <div class="form-group">
+                <label>Gross Wages *</label>
+                <input type="number" step="0.01" name="gross_wages" id="gross_wages" required>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group">
+                <label>Fund from Account</label>
+                <select name="funding_account_id" id="funding_account_id">
+                    <option value="">(Use employee default)</option>
+                    {% for a in accounts %}
+                    <option value="{{ a._id }}">{{ a.name }} (${{ "%.2f"|format(a.balance) }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div id="preview" class="data-entry" style="background:#f7f7f7; margin-top:1rem;">
+            <h3>Preview</h3>
+            <p class="muted">Fill in the form above and the calculation will appear here.</p>
+        </div>
+
+        <button type="submit">Record Payroll</button>
+        <a href="{{ url_for('payroll_page') }}" class="btn">Cancel</a>
+    </form>
+
+    <script>
+    (function() {
+        const csrf = document.querySelector('meta[name="csrf-token"]').content;
+        const form = document.getElementById('payroll-run-form');
+        const empSel = document.getElementById('employee_id');
+        const grossIn = document.getElementById('gross_wages');
+        const hoursIn = document.getElementById('hours');
+        const rateIn = document.getElementById('rate');
+        const payDateIn = document.getElementById('pay_date');
+        const preview = document.getElementById('preview');
+
+        empSel.addEventListener('change', () => {
+            const opt = empSel.options[empSel.selectedIndex];
+            if (!opt) return;
+            const rate = parseFloat(opt.dataset.rate || 0);
+            const payType = opt.dataset.payType;
+            if (payType === 'salary') {
+                grossIn.value = rate.toFixed(2);
+                rateIn.value = '';
+                hoursIn.value = '';
+            } else {
+                rateIn.value = rate.toFixed(2);
+            }
+            updatePreview();
+        });
+
+        function recalcHourly() {
+            const h = parseFloat(hoursIn.value || 0);
+            const r = parseFloat(rateIn.value || 0);
+            if (h && r) grossIn.value = (h * r).toFixed(2);
+            updatePreview();
+        }
+        hoursIn.addEventListener('input', recalcHourly);
+        rateIn.addEventListener('input', recalcHourly);
+        grossIn.addEventListener('input', updatePreview);
+        payDateIn.addEventListener('change', updatePreview);
+
+        async function updatePreview() {
+            if (!empSel.value || !grossIn.value || !payDateIn.value) return;
+            const res = await fetch('{{ url_for("payroll_preview") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrf},
+                body: JSON.stringify({
+                    employee_id: empSel.value,
+                    gross_wages: grossIn.value,
+                    pay_date: payDateIn.value,
+                })
+            });
+            if (!res.ok) return;
+            const c = await res.json();
+            const fica = (c.ee_ss + c.ee_medicare + c.ee_addl_medicare).toFixed(2);
+            const erTotal = (c.er_ss + c.er_medicare + c.er_futa + c.er_suta).toFixed(2);
+            let notesHtml = '';
+            if (c.notes && c.notes.length) {
+                notesHtml = '<p class="muted"><strong>Notes:</strong> ' + c.notes.join(' · ') + '</p>';
+            }
+            preview.innerHTML = `
+                <h3>Preview</h3>
+                <table class="data-table">
+                    <tr><th colspan="2">Employee</th><th colspan="2">Employer</th></tr>
+                    <tr>
+                        <td>SS (6.2%)</td><td>$${c.ee_ss.toFixed(2)}</td>
+                        <td>SS (6.2%)</td><td>$${c.er_ss.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>Medicare (1.45%)</td><td>$${c.ee_medicare.toFixed(2)}</td>
+                        <td>Medicare (1.45%)</td><td>$${c.er_medicare.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>Add'l Medicare</td><td>$${c.ee_addl_medicare.toFixed(2)}</td>
+                        <td>FUTA</td><td>$${c.er_futa.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>Federal Income Tax</td><td>$${c.ee_fit.toFixed(2)}</td>
+                        <td>SUTA (${c.state})</td><td>$${c.er_suta.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td>State Income Tax</td><td>$${c.ee_sit.toFixed(2)}</td>
+                        <td><strong>Total ER Taxes</strong></td><td><strong>$${erTotal}</strong></td>
+                    </tr>
+                    <tr style="border-top:2px solid #999;">
+                        <td><strong>Net Pay</strong></td><td><strong>$${c.net_pay.toFixed(2)}</strong></td>
+                        <td colspan="2" class="muted">A ledger transaction for net pay will be created on the funding account.</td>
+                    </tr>
+                </table>
+                ${notesHtml}
+            `;
+        }
+    })();
+    </script>
+    {% endif %}
+{% endblock %}

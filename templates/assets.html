@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Assets</h1>
+
+    <!-- Net Worth Summary -->
+    <div class="summary-cards">
+        <div class="summary-card income">
+            <span class="summary-label">Total Asset Value</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total_value) }}</span>
+        </div>
+        <div class="summary-card expenses">
+            <span class="summary-label">Total Liabilities</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total_liabilities) }}</span>
+        </div>
+        <div class="summary-card {{ 'positive' if summary.net_worth >= 0 else 'negative' }}">
+            <span class="summary-label">Net Equity</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.net_worth) }}</span>
+        </div>
+    </div>
+
+    <!-- Add Asset Form -->
+    <div class="data-entry">
+        <h2>Add Asset</h2>
+        <form method="POST" action="{{ url_for('add_asset') }}" class="asset-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Asset Name:</label>
+                    <input type="text" id="name" name="name" placeholder="e.g., Primary Residence" required>
+                </div>
+                <div class="form-group">
+                    <label for="asset_type">Asset Type:</label>
+                    <select id="asset_type" name="asset_type" required onchange="toggleAddressField(this.value)">
+                        {% for value, label in asset_types %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="estimated_value">Estimated Value:</label>
+                    <input type="number" id="estimated_value" name="estimated_value" placeholder="0.00" step="0.01" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="purchase_date">Purchase Date:</label>
+                    <input type="date" id="purchase_date" name="purchase_date">
+                </div>
+                <div class="form-group">
+                    <label for="purchase_price">Purchase Price:</label>
+                    <input type="number" id="purchase_price" name="purchase_price" placeholder="0.00" step="0.01">
+                </div>
+            </div>
+            <div class="form-row" id="address-row">
+                <div class="form-group full-width">
+                    <label for="address">Address:</label>
+                    <input type="text" id="address" name="address" placeholder="e.g., 123 Main St, City, State 12345">
+                </div>
+            </div>
+            <h3 class="form-section-title">Liability &amp; Loan Details</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="liability_balance">Liability Balance:</label>
+                    <input type="number" id="liability_balance" name="liability_balance" placeholder="e.g., mortgage balance" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="liability_type">Liability Type:</label>
+                    <select id="liability_type" name="liability_type">
+                        <option value="">None</option>
+                        {% for value, label in liability_types %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="interest_rate">Interest Rate (APR %):</label>
+                    <input type="number" id="interest_rate" name="interest_rate" placeholder="e.g., 6.5" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="loan_term_months">Loan Term (months):</label>
+                    <input type="number" id="loan_term_months" name="loan_term_months" placeholder="e.g., 360">
+                </div>
+                <div class="form-group">
+                    <label for="monthly_payment">Monthly Payment:</label>
+                    <input type="number" id="monthly_payment" name="monthly_payment" placeholder="0.00" step="0.01">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="payment_start_date">Payment Start Date:</label>
+                    <input type="date" id="payment_start_date" name="payment_start_date">
+                </div>
+                <div class="form-group">
+                    <label for="payment_frequency">Payment Frequency:</label>
+                    <select id="payment_frequency" name="payment_frequency">
+                        <option value="monthly">Monthly</option>
+                        <option value="biweekly">Bi-Weekly</option>
+                    </select>
+                </div>
+            </div>
+            <h3 class="form-section-title" id="escrow-section" style="display:none">Escrow &amp; Additional Costs</h3>
+            <div class="form-row" id="escrow-row-1" style="display:none">
+                <div class="form-group">
+                    <label for="property_tax_annual">Property Tax (Annual):</label>
+                    <input type="number" id="property_tax_annual" name="property_tax_annual" placeholder="e.g., 3600" step="0.01">
+                    <small class="field-help">Annual property tax amount</small>
+                </div>
+                <div class="form-group">
+                    <label for="homeowners_insurance_annual">Homeowners Insurance (Annual):</label>
+                    <input type="number" id="homeowners_insurance_annual" name="homeowners_insurance_annual" placeholder="e.g., 1200" step="0.01">
+                    <small class="field-help">Annual insurance premium</small>
+                </div>
+            </div>
+            <div class="form-row" id="escrow-row-2" style="display:none">
+                <div class="form-group">
+                    <label for="pmi_monthly">PMI (Monthly):</label>
+                    <input type="number" id="pmi_monthly" name="pmi_monthly" placeholder="0.00" step="0.01">
+                    <small class="field-help">Private mortgage insurance</small>
+                </div>
+                <div class="form-group">
+                    <label for="hoa_monthly">HOA Fees (Monthly):</label>
+                    <input type="number" id="hoa_monthly" name="hoa_monthly" placeholder="0.00" step="0.01">
+                    <small class="field-help">Homeowners association dues</small>
+                </div>
+            </div>
+            <div class="form-row" id="escrow-row-3" style="display:none">
+                <div class="form-group">
+                    <label for="escrow_balance">Current Escrow Balance:</label>
+                    <input type="number" id="escrow_balance" name="escrow_balance" placeholder="0.00" step="0.01">
+                    <small class="field-help">Current balance in your escrow account</small>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="payment_match">Auto-link payment descriptions:</label>
+                    <input type="text" id="payment_match" name="payment_match" placeholder="e.g., Mortgage">
+                    <small class="field-help">Comma-separated ledger descriptions that auto-link as loan payments (principal-only).</small>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="notes">Notes:</label>
+                    <textarea id="notes" name="notes" placeholder="Additional notes..."></textarea>
+                </div>
+            </div>
+            <button type="submit">Add Asset</button>
+        </form>
+    </div>
+
+    <!-- Real Estate Assets -->
+    {% set real_estate = assets | selectattr('asset_type', 'equalto', 'real_estate') | list %}
+    {% if real_estate %}
+    <div class="asset-section">
+        <h2>Real Estate</h2>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>Estimated Value</th>
+                    <th>Liability</th>
+                    <th>Payment Start</th>
+                    <th>Equity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in real_estate %}
+                <tr>
+                    <td data-label="Name">{{ asset.name }}</td>
+                    <td data-label="Address">{{ asset.address or 'N/A' }}</td>
+                    <td data-label="Estimated Value" class="positive-amount">${{ "%.2f"|format(asset.estimated_value) }}</td>
+                    <td data-label="Liability" class="negative-balance">{{ "$%.2f"|format(asset.liability_balance) if asset.liability_balance else '-' }}</td>
+                    <td data-label="Payment Start">
+                        {% if asset.payment_start_date %}
+                            {% if asset.payment_start_date is string %}
+                                {{ asset.payment_start_date }}
+                            {% else %}
+                                {{ asset.payment_start_date.strftime('%b %Y') }}
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td data-label="Equity" class="{{ 'positive-amount' if asset.equity >= 0 else 'negative-balance' }}">${{ "%.2f"|format(asset.equity) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        {% if asset.liability_balance and asset.interest_rate %}
+                        <a href="{{ url_for('amortization_page', asset_id=asset._id) }}" class="action-btn verify-btn">Amortization</a>
+                        {% endif %}
+                        <a href="{{ url_for('edit_asset', asset_id=asset._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_asset', asset_id=asset._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this asset?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Vehicles -->
+    {% set vehicles = assets | selectattr('asset_type', 'equalto', 'vehicle') | list %}
+    {% if vehicles %}
+    <div class="asset-section">
+        <h2>Vehicles</h2>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Estimated Value</th>
+                    <th>Loan Balance</th>
+                    <th>Equity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in vehicles %}
+                <tr>
+                    <td data-label="Name">{{ asset.name }}</td>
+                    <td data-label="Estimated Value" class="positive-amount">${{ "%.2f"|format(asset.estimated_value) }}</td>
+                    <td data-label="Loan Balance" class="negative-balance">{{ "$%.2f"|format(asset.liability_balance) if asset.liability_balance else '-' }}</td>
+                    <td data-label="Equity" class="{{ 'positive-amount' if asset.equity >= 0 else 'negative-balance' }}">${{ "%.2f"|format(asset.equity) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        {% if asset.liability_balance and asset.interest_rate %}
+                        <a href="{{ url_for('amortization_page', asset_id=asset._id) }}" class="action-btn verify-btn">Amortization</a>
+                        {% endif %}
+                        <a href="{{ url_for('edit_asset', asset_id=asset._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_asset', asset_id=asset._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this asset?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Other Assets -->
+    {% set other_assets = assets | selectattr('asset_type', 'equalto', 'other') | list %}
+    {% if other_assets %}
+    <div class="asset-section">
+        <h2>Other Assets</h2>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Estimated Value</th>
+                    <th>Liability</th>
+                    <th>Equity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for asset in other_assets %}
+                <tr>
+                    <td data-label="Name">
+                        {{ asset.name }}
+                        {% if asset.notes %}<br><small class="item-notes">{{ asset.notes }}</small>{% endif %}
+                    </td>
+                    <td data-label="Estimated Value" class="positive-amount">${{ "%.2f"|format(asset.estimated_value) }}</td>
+                    <td data-label="Liability" class="negative-balance">{{ "$%.2f"|format(asset.liability_balance) if asset.liability_balance else '-' }}</td>
+                    <td data-label="Equity" class="{{ 'positive-amount' if asset.equity >= 0 else 'negative-balance' }}">${{ "%.2f"|format(asset.equity) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        {% if asset.liability_balance and asset.interest_rate %}
+                        <a href="{{ url_for('amortization_page', asset_id=asset._id) }}" class="action-btn verify-btn">Amortization</a>
+                        {% endif %}
+                        <a href="{{ url_for('edit_asset', asset_id=asset._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_asset', asset_id=asset._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this asset?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if not assets %}
+    <div class="empty-state">
+        <p>No assets added yet. Add your first asset above to get started.</p>
+    </div>
+    {% endif %}
+
+    <script>
+        function toggleAddressField(assetType) {
+            const addressRow = document.getElementById('address-row');
+            const escrowSection = document.getElementById('escrow-section');
+            const escrowRow1 = document.getElementById('escrow-row-1');
+            const escrowRow2 = document.getElementById('escrow-row-2');
+            const escrowRow3 = document.getElementById('escrow-row-3');
+            if (assetType === 'real_estate') {
+                addressRow.style.display = 'flex';
+                escrowSection.style.display = 'block';
+                escrowRow1.style.display = 'flex';
+                escrowRow2.style.display = 'flex';
+                escrowRow3.style.display = 'flex';
+            } else {
+                addressRow.style.display = 'none';
+                escrowSection.style.display = 'none';
+                escrowRow1.style.display = 'none';
+                escrowRow2.style.display = 'none';
+                escrowRow3.style.display = 'none';
+            }
+        }
+    </script>
+{% endblock %}

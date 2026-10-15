@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumb" style="margin-bottom:1rem;">
+    <a href="{{ url_for('debts_page') }}">&larr; Debts</a>
+</nav>
+
+<h1>{{ plan.vendor }}</h1>
+{% if plan.status == 'closed' %}
+<p><span style="background:#28a745;color:#fff;padding:0.1rem 0.5rem;border-radius:3px;">Closed</span></p>
+{% endif %}
+
+<div class="summary-cards">
+    <div class="summary-card expenses">
+        <span class="summary-label">Original</span>
+        <span class="summary-amount">${{ "%.2f"|format(plan.original_amount) }}</span>
+    </div>
+    <div class="summary-card investments">
+        <span class="summary-label">Paid</span>
+        <span class="summary-amount">${{ "%.2f"|format(plan.paid) }}</span>
+    </div>
+    <div class="summary-card negative">
+        <span class="summary-label">Remaining</span>
+        <span class="summary-amount">${{ "%.2f"|format(plan.remaining) }}</span>
+    </div>
+    <div class="summary-card">
+        <span class="summary-label">Payments</span>
+        <span class="summary-amount">{{ plan.payments_made }} / {{ plan.num_payments }}</span>
+    </div>
+    <div class="summary-card">
+        <span class="summary-label">Est. Ends</span>
+        <span class="summary-amount">{{ plan.end_date_estimate.strftime('%b %Y') if plan.end_date_estimate else '—' }}</span>
+    </div>
+</div>
+
+<div style="background:#e9ecef;border-radius:4px;height:24px;overflow:hidden;margin:1rem 0;">
+    <div style="background:#28a745;height:100%;width:{{ '%.1f'|format(plan.progress_pct) }}%;"></div>
+</div>
+
+<div class="data-entry">
+    <h2>Plan Details</h2>
+    <form method="POST" action="{{ url_for('edit_payment_plan', plan_id=plan._id) }}" class="budget-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-row">
+            <div class="form-group">
+                <label>Vendor:</label>
+                <input type="text" name="vendor" value="{{ plan.vendor }}" required>
+            </div>
+            <div class="form-group">
+                <label>Original Amount:</label>
+                <input type="number" name="original_amount" step="0.01" value="{{ plan.original_amount }}" required>
+            </div>
+            <div class="form-group">
+                <label>Monthly Payment:</label>
+                <input type="number" name="monthly_payment" step="0.01" value="{{ plan.monthly_payment }}" required>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Start Date:</label>
+                <input type="date" name="start_date" value="{% if plan.start_date %}{{ plan.start_date.strftime('%Y-%m-%d') if plan.start_date.strftime is defined else plan.start_date }}{% endif %}">
+            </div>
+            <div class="form-group">
+                <label>Credit Card:</label>
+                <select name="card_name">
+                    <option value="">— Any —</option>
+                    {% for c in cc_card_names %}
+                    <option value="{{ c }}" {% if plan.card_name == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Category:</label>
+                <select name="category">
+                    <option value="">— None —</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat }}" {% if plan.category == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Status:</label>
+                <select name="status">
+                    <option value="active" {% if plan.status == 'active' %}selected{% endif %}>Active</option>
+                    <option value="closed" {% if plan.status == 'closed' %}selected{% endif %}>Closed</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group full-width">
+                <label>Notes:</label>
+                <textarea name="notes">{{ plan.notes or '' }}</textarea>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Save</button>
+        </div>
+    </form>
+</div>
+
+<div class="data-entry">
+    <h2>Linked Transactions</h2>
+    {% if linked %}
+    <table class="account-table">
+        <thead>
+            <tr><th>Date</th><th>Card</th><th>Description</th><th>Amount</th></tr>
+        </thead>
+        <tbody>
+            {% for t in linked %}
+            <tr>
+                <td data-label="Date">{{ t.date.strftime('%m/%d/%Y') if t.date.strftime is defined else t.date }}</td>
+                <td data-label="Card">{{ t.card_name }}</td>
+                <td data-label="Description">{{ t.description }}</td>
+                <td data-label="Amount">${{ "%.2f"|format(t.amount) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#6c757d;">No transactions linked yet. Go to the Credit Cards page and pick this plan from the "Plan" column on a transaction row.</p>
+    {% endif %}
+</div>
+{% endblock %}

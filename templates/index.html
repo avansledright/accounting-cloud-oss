@@ -1,0 +1,610 @@
+{% extends "base.html" %}
+
+{% block sidebar_filter %}
+    <div class="sidebar-filter">
+        <div class="sidebar-filter-label">Account</div>
+        <select onchange="window.location.href='?account=' + this.value">
+            <option value="all" {{ 'selected' if account_filter == 'all' else '' }}>All Accounts</option>
+            {% for acc in accounts_for_filter %}
+            <option value="{{ acc.id }}" {{ 'selected' if account_filter == acc.id else '' }}>
+                {{ acc.name }}{% if acc.is_primary %} (Primary){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <h1>Yearly Financial Outlook</h1>
+
+    <!-- Transaction Filter Bar -->
+    <div class="filter-bar">
+        <div class="transfer-header" id="filter-toggle">
+            <h2>Search &amp; Filter Transactions</h2>
+            <span class="toggle-icon">&#9660;</span>
+        </div>
+        <div class="filter-body" id="filter-body" style="display: {{ 'block' if filtered_mode else 'none' }};">
+            <form method="GET" action="{{ url_for('ledger_page') }}" class="filter-form">
+                <div class="filter-row">
+                    <div class="form-group">
+                        <label for="search">Search:</label>
+                        <input type="text" id="search" name="search" placeholder="Description..." value="{{ filter_params.search }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="date_from">Date From:</label>
+                        <input type="date" id="date_from" name="date_from" value="{{ filter_params.date_from }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="date_to">Date To:</label>
+                        <input type="date" id="date_to" name="date_to" value="{{ filter_params.date_to }}">
+                    </div>
+                </div>
+                <div class="filter-row">
+                    <div class="form-group">
+                        <label for="amount_min">Min Amount:</label>
+                        <input type="number" id="amount_min" name="amount_min" step="0.01" placeholder="0.00" value="{{ filter_params.amount_min }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="amount_max">Max Amount:</label>
+                        <input type="number" id="amount_max" name="amount_max" step="0.01" placeholder="0.00" value="{{ filter_params.amount_max }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="filter_type">Type:</label>
+                        <select id="filter_type" name="type">
+                            <option value="">All</option>
+                            <option value="expense" {{ 'selected' if filter_params.type == 'expense' else '' }}>Expense</option>
+                            <option value="income" {{ 'selected' if filter_params.type == 'income' else '' }}>Income</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="filter-actions">
+                    <button type="submit" class="action-btn verify-btn" style="padding: 0.5rem 1.5rem; height: 38px; min-width: auto;">Apply Filters</button>
+                    <a href="{{ url_for('ledger_page') }}" class="action-btn cancel-btn" style="padding: 0.5rem 1.5rem; height: 38px; min-width: auto;">Clear</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if not filtered_mode %}
+    <!-- Account Summary Section -->
+    <div class="account-summary-section">
+        <div class="summary-row">
+            <!-- Total Balance -->
+            <div class="total-balance-card">
+                <span class="card-label">Total Balance</span>
+                <span class="card-amount {{ 'negative' if current_balance < 0 else '' }}">${{ "%.2f"|format(current_balance) }}</span>
+            </div>
+
+            <!-- Cash Accounts -->
+            <div class="account-group-card cash">
+                <div class="card-header">
+                    <span class="card-label">Cash Accounts</span>
+                    <span class="card-total">${{ "%.2f"|format(cash_total) }}</span>
+                </div>
+                {% if cash_accounts %}
+                <div class="account-list">
+                    {% for account in cash_accounts %}
+                    <div class="account-item">
+                        <span class="account-name">{{ account.name }}{% if account.is_primary %} <span class="primary-tag">Primary</span>{% endif %}</span>
+                        <span class="account-balance {{ 'negative-balance' if account.confirmed_balance < 0 else '' }}">${{ "%.2f"|format(account.confirmed_balance) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="no-accounts">No cash accounts</div>
+                {% endif %}
+            </div>
+
+            <!-- Investment Accounts -->
+            <div class="account-group-card investments">
+                <div class="card-header">
+                    <span class="card-label">Investments</span>
+                    <span class="card-total">${{ "%.2f"|format(investment_total) }}</span>
+                </div>
+                {% if investment_accounts %}
+                <div class="account-list">
+                    {% for account in investment_accounts %}
+                    <div class="account-item">
+                        <span class="account-name">{{ account.name }}</span>
+                        <span class="account-balance">${{ "%.2f"|format(account.calculated_balance) }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="no-accounts">No investment accounts</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Transfer Section (only in outlook mode) -->
+    <div class="transfer-section">
+        <div class="transfer-header" id="transfer-toggle">
+            <h2>Transfer Between Accounts</h2>
+            <span class="toggle-icon">&#9660;</span>
+        </div>
+        <div class="transfer-body" id="transfer-body" style="display: none;">
+            <form action="{{ url_for('add_transfer') }}" method="POST" class="transfer-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="from_account_id">From Account</label>
+                        <select name="from_account_id" id="from_account_id" required>
+                            {% for acc in accounts_for_filter %}
+                            <option value="{{ acc.id }}">{{ acc.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="to_account_id">To Account</label>
+                        <select name="to_account_id" id="to_account_id" required>
+                            {% for acc in accounts_for_filter %}
+                            <option value="{{ acc.id }}">{{ acc.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="transfer_amount">Amount</label>
+                        <input type="number" name="amount" id="transfer_amount" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="transfer_date">Date</label>
+                        <input type="date" name="date" id="transfer_date" value="{{ today }}" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group" style="flex: 2;">
+                        <label for="transfer_description">Description</label>
+                        <input type="text" name="description" id="transfer_description" placeholder="Account Transfer">
+                    </div>
+                    <div class="form-group">
+                        <button type="submit" class="action-btn verify-btn" style="margin-top: 1.3rem; padding: 0.5rem 1.5rem; height: 38px; min-width: auto;">Transfer</button>
+                    </div>
+                </div>
+            </form>
+            <a href="{{ url_for('transfers_page') }}" class="transfer-history-link">View Transfer History &rarr;</a>
+        </div>
+    </div>
+
+    <!-- Cash Flow Warning Banner -->
+    {% set negative_months = [] %}
+    {% for month_data in yearly_outlook %}
+        {% if month_data.min_balance is not none and month_data.min_balance < 0 %}
+            {% if negative_months.append(month_data) %}{% endif %}
+        {% endif %}
+    {% endfor %}
+    {% if negative_months %}
+    <div class="cash-flow-warning" id="cash-flow-warning">
+        <div class="cash-flow-warning-header" id="cash-flow-warning-toggle">
+            <span class="cash-flow-warning-icon">&#9888;</span>
+            <span class="cash-flow-warning-title">Cash Flow Alert: {{ negative_months|length }} month{{ 's' if negative_months|length != 1 else '' }} with negative balance</span>
+            <button class="cash-flow-warning-dismiss" id="cash-flow-warning-dismiss" title="Dismiss">&times;</button>
+        </div>
+        <div class="cash-flow-warning-body" id="cash-flow-warning-body">
+            <ul>
+                {% for m in negative_months %}
+                <li>
+                    <strong>{{ m.month }}</strong>: dips to
+                    <span class="negative-balance">${{ "%.2f"|format(m.min_balance) }}</span>
+                    {% if m.balance >= 0 %}
+                        (recovers to ${{ "%.2f"|format(m.balance) }} by month end)
+                    {% else %}
+                        (ends at <span class="negative-balance">${{ "%.2f"|format(m.balance) }}</span>)
+                    {% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Monthly Forecast Cards -->
+    <div class="forecast-strip">
+        {% for month_data in yearly_outlook %}
+        <div class="forecast-card {{ 'forecast-card-negative' if month_data.balance < 0 else 'forecast-card-positive' }} {{ 'forecast-card-warn' if month_data.min_balance is not none and month_data.min_balance < 0 and month_data.balance >= 0 else '' }}"
+             data-target-month="{{ loop.index }}"
+             title="End: ${{ '%.2f'|format(month_data.balance) }} | Low: ${{ '%.2f'|format(month_data.min_balance) }}">
+            <div class="forecast-card-month">{{ month_data.month.split(' ')[0][:3] }}</div>
+            <div class="forecast-card-balance {{ 'negative-balance' if month_data.balance < 0 else '' }}">
+                ${{ "%.2f"|format(month_data.balance) }}
+            </div>
+            {% if month_data.min_balance is not none and month_data.min_balance < 0 and month_data.balance >= 0 %}
+            <div class="forecast-card-lowpoint">&#9888; Low: ${{ "%.2f"|format(month_data.min_balance) }}</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Balance Projection Chart -->
+    <div class="outlook-chart-container">
+        <canvas id="balanceProjectionChart" height="200"></canvas>
+    </div>
+
+    <!-- Income vs Expenses Chart -->
+    <div class="outlook-chart-container">
+        <canvas id="incomeExpenseChart" height="160"></canvas>
+    </div>
+
+    <div style="text-align: right; margin-bottom: 0.5rem;">
+        <a href="{{ url_for('history_page') }}" class="action-btn edit-btn" style="text-decoration: none; padding: 0.4rem 1rem;">View History &rarr;</a>
+    </div>
+
+    <div class="outlook-container">
+        <table class="outlook-table">
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th>Projected Balance</th>
+                    <th>Low Point</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for month_data in yearly_outlook %}
+                <tr class="month-row" data-month-id="{{ loop.index }}" data-min-balance="{{ month_data.min_balance }}">
+                    <td class="month-cell">{{ month_data.month }}</td>
+                    <td data-label="Balance" class="{{ 'negative-balance' if month_data.balance < 0 else '' }}">
+                        ${{ "%.2f"|format(month_data.balance) }}
+                    </td>
+                    <td data-label="Low" class="{{ 'low-point-warning' if month_data.min_balance is not none and month_data.min_balance < 0 else '' }}">
+                        {% if month_data.min_balance is not none and month_data.min_balance < 0 %}
+                        <span class="low-point-icon">&#9888;</span>
+                        {% endif %}
+                        ${{ "%.2f"|format(month_data.min_balance) }}
+                    </td>
+                </tr>
+                <tr class="transaction-row" id="transactions-{{ loop.index }}" style="display: {{ 'table-row' if month_data.month == current_month else 'none' }};">
+                    <td colspan="3">
+                        <table class="transaction-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Account</th>
+                                    <th>Amount</th>
+                                    <th>Balance</th>
+                                    <th>Type</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for trans in month_data.transactions %}
+                                <tr data-id="{{ trans._id }}">
+                                    <td data-label="Date">{{ trans.date }}</td>
+                                    <td data-label="Description">{{ trans.description }}
+                                        {% if trans.type == 'actual' %}
+                                        <span class="badge loan-badge" data-id="{{ trans._id }}" title="Linked payment — lowers this loan's balance"
+                                              style="background:#6f42c1;color:#fff;font-size:0.7em;margin-left:0.3rem;{% if not trans.loan_label %}display:none;{% endif %}">&rarr; <span class="loan-badge-text">{{ trans.loan_label or '' }}</span></span>
+                                        {% elif trans.loan_payoff %}
+                                        <span class="badge" title="Projected final payment — clears {{ trans.loan_label }}. Later payments are dropped; if this payoff doesn't happen, the regular payment resumes next month."
+                                              style="background:#198754;color:#fff;font-size:0.7em;margin-left:0.3rem;">Payoff &middot; {{ trans.loan_label }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td data-label="Account"><span class="account-badge">{{ trans.account_name or 'Primary' }}</span></td>
+                                    <td data-label="Amount" class="{{ 'negative-balance' if trans.amount < 0 else '' }}">
+                                        {% if trans.type == 'projected' %}
+                                        <span class="editable-amount {{ 'has-override' if trans.has_override else '' }}"
+                                              data-recurring-id="{{ trans.recurring_id }}"
+                                              data-date="{{ trans.date }}"
+                                              data-base-amount="{{ trans.base_amount|abs }}"
+                                              title="Click to edit (Base: ${{ '%.2f'|format(trans.base_amount|abs) }})">
+                                            ${{ "%.2f"|format(trans.amount|abs) }}
+                                        </span>
+                                        {% else %}
+                                        ${{ "%.2f"|format(trans.amount) }}
+                                        {% endif %}
+                                    </td>
+                                    <td data-label="Balance" class="{{ 'negative-balance' if trans.running_balance < 0 else '' }}">
+                                        ${{ "%.2f"|format(trans.running_balance) }}
+                                    </td>
+                                    <td data-label="Type">
+                                        <span class="badge badge-{{ trans.type }}">{{ trans.type|capitalize }}</span>
+                                        {% if trans.type == 'projected' and trans.has_override %}
+                                        <span class="badge badge-override" title="Amount overridden from base">*</span>
+                                        {% endif %}
+                                    </td>
+                                    <td data-label="Actions" class="actions-cell">
+                                        {% if trans.type == 'actual' %}
+                                        {% if trans.amount < 0 and loan_options %}
+                                        <select class="loan-link-select" data-id="{{ trans._id }}" onchange="linkLoan(this)" title="Link this payment to a loan to pay it down">
+                                            <option value="">— Loan —</option>
+                                            {% for opt in loan_options %}
+                                            <option value="{{ opt.value }}" {% if trans.loan_ref == opt.value %}selected{% endif %}>{{ opt.name }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        {% endif %}
+                                        <a href="{{ url_for('edit_transaction', transaction_id=trans._id) }}" class="action-btn edit-btn">Edit</a>
+                                        <button class="action-btn delete-btn" data-id="{{ trans._id }}">Delete</button>
+                                        {% elif trans.type == 'projected' %}
+                                        {% if trans.is_transfer %}
+                                        <a href="{{ url_for('verify_transaction', description=trans.description, amount=trans.amount|abs, date=trans.date, transaction_type='income' if trans.amount > 0 else 'expense', is_transfer='1', transfer_from_id=trans.transfer_from_id, transfer_to_id=trans.transfer_to_id) }}" class="action-btn verify-btn">Verify</a>
+                                        {% else %}
+                                        <a href="{{ url_for('verify_transaction', description=trans.description, amount=trans.amount|abs, date=trans.date, transaction_type='income' if trans.amount > 0 else 'expense', account_id=trans.account_id) }}" class="action-btn verify-btn">Verify</a>
+                                        {% endif %}
+                                        <button class="action-btn skip-btn" data-description="{{ trans.description }}" data-date="{{ trans.date }}">Skip</button>
+                                        {% if trans.recurring_id %}
+                                        <button class="action-btn delete-btn delete-recurring-btn"
+                                                data-recurring-id="{{ trans.recurring_id }}"
+                                                data-is-transfer="{{ '1' if trans.is_transfer else '0' }}"
+                                                data-description="{{ trans.description }}"
+                                                title="Delete the recurring template">Delete Template</button>
+                                        {% endif %}
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="7">No transactions for this month.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <script>
+        // Link a ledger transaction to a loan (debt or asset liability) inline
+        const _csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
+        function linkLoan(select) {
+            const tid = select.dataset.id;
+            const ref = select.value || '';
+            fetch('{{ url_for("link_transaction_loan") }}', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': _csrfToken },
+                body: JSON.stringify({ transaction_id: tid, loan_ref: ref })
+            }).then(r => r.json()).then(data => {
+                if (!data.success) { alert('Failed to link payment'); return; }
+                // Update the badge next to the description
+                const badge = document.querySelector('.loan-badge[data-id="' + tid + '"]');
+                if (badge) {
+                    const text = badge.querySelector('.loan-badge-text');
+                    if (data.loan_label) { text.textContent = data.loan_label; badge.style.display = ''; }
+                    else { text.textContent = ''; badge.style.display = 'none'; }
+                }
+            }).catch(() => alert('Failed to link payment'));
+        }
+
+        // Balance Projection Chart
+        const outlookData = [
+            {% for month_data in yearly_outlook %}
+            {
+                month: "{{ month_data.month.split(' ')[0][:3] }}",
+                balance: {{ month_data.balance }},
+                minBalance: {{ month_data.min_balance }}
+            }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+
+        if (outlookData.length > 0) {
+            const chartCtx = document.getElementById('balanceProjectionChart');
+            if (chartCtx) {
+                new Chart(chartCtx.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: outlookData.map(d => d.month),
+                        datasets: [
+                            {
+                                label: 'End-of-Month Balance',
+                                data: outlookData.map(d => d.balance),
+                                borderColor: '#2e7d32',
+                                backgroundColor: function(context) {
+                                    const chart = context.chart;
+                                    const {ctx: c, chartArea} = chart;
+                                    if (!chartArea) return 'rgba(46,125,50,0.1)';
+                                    const gradient = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+                                    gradient.addColorStop(0, 'rgba(46,125,50,0.2)');
+                                    gradient.addColorStop(1, 'rgba(46,125,50,0.02)');
+                                    return gradient;
+                                },
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 4,
+                                pointHitRadius: 10,
+                                borderWidth: 2,
+                            },
+                            {
+                                label: 'Low Point',
+                                data: outlookData.map(d => d.minBalance),
+                                borderColor: '#e65100',
+                                borderDash: [5, 5],
+                                tension: 0.3,
+                                pointRadius: 3,
+                                pointHitRadius: 10,
+                                borderWidth: 1.5,
+                                fill: false,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'index',
+                            intersect: false,
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': $' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                    }
+                                }
+                            },
+                            annotation: {
+                                annotations: {
+                                    zeroLine: {
+                                        type: 'line',
+                                        yMin: 0,
+                                        yMax: 0,
+                                        borderColor: '#dc3545',
+                                        borderWidth: 1.5,
+                                        borderDash: [3, 3],
+                                        label: {
+                                            display: false,
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { display: false }
+                            },
+                            y: {
+                                ticks: {
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+
+        // Income vs Expenses bar chart
+        const ieData = [
+            {% for ie in monthly_income_expense %}
+            {
+                month: "{{ ie.month }}",
+                income: {{ ie.income }},
+                expenses: {{ ie.expenses }}
+            }{{ "," if not loop.last else "" }}
+            {% endfor %}
+        ];
+
+        if (ieData.length > 0) {
+            const ieCtx = document.getElementById('incomeExpenseChart');
+            if (ieCtx) {
+                new Chart(ieCtx.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: ieData.map(d => d.month),
+                        datasets: [
+                            {
+                                label: 'Income',
+                                data: ieData.map(d => d.income),
+                                backgroundColor: 'rgba(46, 125, 50, 0.7)',
+                                borderRadius: 3,
+                            },
+                            {
+                                label: 'Expenses',
+                                data: ieData.map(d => d.expenses),
+                                backgroundColor: 'rgba(211, 47, 47, 0.7)',
+                                borderRadius: 3,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        return context.dataset.label + ': $' + context.parsed.y.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false } },
+                            y: {
+                                ticks: {
+                                    callback: function(value) {
+                                        return '$' + value.toLocaleString();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    </script>
+
+    {% else %}
+    <!-- Filtered Results -->
+    <div class="asset-section">
+        <h2>Search Results ({{ filtered_results|length }} transaction{{ 's' if filtered_results|length != 1 else '' }})</h2>
+        {% if filtered_results %}
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Account</th>
+                    <th>Amount</th>
+                    <th>Type</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in filtered_results %}
+                <tr>
+                    <td data-label="Date">{{ t.date }}</td>
+                    <td data-label="Description">{{ t.description }}</td>
+                    <td data-label="Account"><span class="account-badge">{{ t.account_name }}</span></td>
+                    <td data-label="Amount" class="{{ 'negative-balance' if t.transaction_type == 'expense' else 'positive-amount' }}">
+                        {{ '-' if t.transaction_type == 'expense' else '' }}${{ "%.2f"|format(t.amount) }}
+                    </td>
+                    <td data-label="Type">
+                        <span class="badge {{ 'badge-actual' if t.transaction_type == 'income' else 'badge-projected' }}">{{ t.transaction_type|capitalize }}</span>
+                    </td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('edit_transaction', transaction_id=t._id) }}" class="action-btn edit-btn">Edit</a>
+                        <button class="action-btn delete-btn" data-id="{{ t._id }}">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: #6c757d; padding: 2rem;">No transactions match your filters.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="floating-add-transaction collapsed" id="floatingAddTransaction">
+        <div class="floating-add-header" id="floatingAddToggle">
+            <span class="floating-add-title">Add Transaction</span>
+            <span class="floating-add-chevron">&#9650;</span>
+        </div>
+        <div class="floating-add-body">
+            <form class="transaction-form floating-add-form">
+                <label>
+                    <span>Date</span>
+                    <input type="date" name="date" required>
+                </label>
+                <label>
+                    <span>Description</span>
+                    <input type="text" name="description" placeholder="Description" required>
+                </label>
+                <label>
+                    <span>Account</span>
+                    <select name="account_id" class="account-select">
+                        {% for acc in accounts_for_filter %}
+                        <option value="{{ acc.id }}" {{ 'selected' if account_filter == acc.id else ('selected' if account_filter == 'all' and acc.is_primary else '') }}>{{ acc.name }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label>
+                    <span>Amount</span>
+                    <input type="number" name="amount" placeholder="0.00" step="0.01" required>
+                </label>
+                <label>
+                    <span>Type</span>
+                    <select name="transaction_type">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                    </select>
+                </label>
+                <button type="submit">Add Transaction</button>
+            </form>
+        </div>
+    </div>
+
+{% endblock %}

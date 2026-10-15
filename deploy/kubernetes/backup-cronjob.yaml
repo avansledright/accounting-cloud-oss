@@ -1,0 +1,59 @@
+# Nightly mongodump of the database into a PVC, keeping the 14 newest archives.
+# Restore with:
+#   mongorestore --uri="mongodb://mongodb:27017/" --gzip --drop \
+#     --archive=/backups/accounting_cloud-YYYYmmdd-HHMMSS.archive.gz
+# Copy the archives off-cluster too (they contain all of your financial data;
+# store them encrypted).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: accounting-backups
+  namespace: accounting
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # storageClassName: your-storage-class
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: accounting-mongodb-backup
+  namespace: accounting
+spec:
+  schedule: "0 3 * * *"
+  # timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: mongodump
+            image: mongo:7.0
+            env:
+            - name: MONGO_URI
+              valueFrom: {configMapKeyRef: {name: accounting-config, key: MONGO_URI}}
+            - name: MONGO_DB_NAME
+              valueFrom: {configMapKeyRef: {name: accounting-config, key: MONGO_DB_NAME}}
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -euo pipefail
+              OUT="/backups/${MONGO_DB_NAME}-$(date +%Y%m%d-%H%M%S).archive.gz"
+              mongodump --uri="${MONGO_URI}" --db="${MONGO_DB_NAME}" --gzip --archive="${OUT}"
+              echo "Backup written: ${OUT}"
+              ls -1t /backups/${MONGO_DB_NAME}-*.archive.gz | tail -n +15 | xargs -r rm -f
+            volumeMounts:
+            - name: backups
+              mountPath: /backups
+          volumes:
+          - name: backups
+            persistentVolumeClaim:
+              claimName: accounting-backups

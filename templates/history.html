@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block sidebar_filter %}
+    <div class="sidebar-filter">
+        <div class="sidebar-filter-label">Account</div>
+        <select onchange="window.location.href='?account=' + this.value + '&year={{ year }}'">
+            <option value="all" {{ 'selected' if account_filter == 'all' else '' }}>All Accounts</option>
+            {% for acc in accounts_for_filter %}
+            <option value="{{ acc.id }}" {{ 'selected' if account_filter == acc.id else '' }}>
+                {{ acc.name }}{% if acc.is_primary %} (Primary){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div class="breadcrumb">
+        <a href="{{ url_for('ledger_page') }}">Ledger</a> &rsaquo; History
+    </div>
+
+    <h1>Transaction History &mdash; {{ year }}</h1>
+
+    {% if not monthly_data %}
+    <p style="text-align: center; color: #6c757d; padding: 2rem;">No closed months to display for {{ year }}.</p>
+    {% else %}
+    <div class="outlook-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Month</th>
+                    <th>Income</th>
+                    <th>Expenses</th>
+                    <th>Net</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for month_data in monthly_data %}
+                <tr class="month-row" data-month-id="{{ loop.index }}">
+                    <td>{{ month_data.month }}</td>
+                    <td class="positive-amount">${{ "%.2f"|format(month_data.income) }}</td>
+                    <td class="negative-balance">${{ "%.2f"|format(month_data.expenses) }}</td>
+                    <td class="{{ 'negative-balance' if month_data.net < 0 else '' }}">
+                        ${{ "%.2f"|format(month_data.net) }}
+                    </td>
+                </tr>
+                <tr class="transaction-row" id="transactions-{{ loop.index }}" style="display: none;">
+                    <td colspan="4">
+                        <table class="transaction-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Description</th>
+                                    <th>Account</th>
+                                    <th>Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for trans in month_data.transactions %}
+                                <tr>
+                                    <td data-label="Date">{{ trans.date }}</td>
+                                    <td data-label="Description">{{ trans.description }}</td>
+                                    <td data-label="Account"><span class="account-badge">{{ trans.account_name or 'Primary' }}</span></td>
+                                    <td data-label="Amount" class="{{ 'negative-balance' if trans.amount < 0 else '' }}">
+                                        ${{ "%.2f"|format(trans.amount|abs) }}
+                                        {% if trans.amount < 0 %}
+                                        <span class="badge badge-projected" style="font-size: 0.7rem;">Expense</span>
+                                        {% else %}
+                                        <span class="badge badge-actual" style="font-size: 0.7rem;">Income</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% else %}
+                                <tr>
+                                    <td colspan="4">No transactions for this month.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+{% endblock %}

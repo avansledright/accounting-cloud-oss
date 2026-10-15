@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Edit Asset</h1>
+
+    <div class="data-entry">
+        <form method="POST" action="{{ url_for('edit_asset', asset_id=asset._id) }}" class="asset-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Asset Name:</label>
+                    <input type="text" id="name" name="name" value="{{ asset.name }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="asset_type">Asset Type:</label>
+                    <select id="asset_type" name="asset_type" required onchange="toggleAddressField(this.value)">
+                        {% for value, label in asset_types %}
+                        <option value="{{ value }}" {{ 'selected' if asset.asset_type == value else '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="estimated_value">Estimated Value:</label>
+                    <input type="number" id="estimated_value" name="estimated_value" value="{{ asset.estimated_value }}" step="0.01" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="purchase_date">Purchase Date:</label>
+                    <input type="date" id="purchase_date" name="purchase_date" value="{{ asset.purchase_date or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="purchase_price">Purchase Price:</label>
+                    <input type="number" id="purchase_price" name="purchase_price" value="{{ asset.purchase_price or '' }}" step="0.01">
+                </div>
+            </div>
+            <div class="form-row" id="address-row" style="{{ 'display:flex' if asset.asset_type == 'real_estate' else 'display:none' }}">
+                <div class="form-group full-width">
+                    <label for="address">Address:</label>
+                    <input type="text" id="address" name="address" value="{{ asset.address or '' }}">
+                </div>
+            </div>
+            <h3 class="form-section-title">Liability &amp; Loan Details</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="liability_balance">Liability Balance:</label>
+                    <input type="number" id="liability_balance" name="liability_balance" value="{{ asset.liability_balance or '' }}" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="liability_type">Liability Type:</label>
+                    <select id="liability_type" name="liability_type">
+                        <option value="">None</option>
+                        {% for value, label in liability_types %}
+                        <option value="{{ value }}" {{ 'selected' if asset.liability_type == value else '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="interest_rate">Interest Rate (APR %):</label>
+                    <input type="number" id="interest_rate" name="interest_rate" value="{{ asset.interest_rate or '' }}" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="loan_term_months">Loan Term (months):</label>
+                    <input type="number" id="loan_term_months" name="loan_term_months" value="{{ asset.loan_term_months or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="monthly_payment">Monthly Payment:</label>
+                    <input type="number" id="monthly_payment" name="monthly_payment" value="{{ asset.monthly_payment or '' }}" step="0.01">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="payment_start_date">Payment Start Date:</label>
+                    <input type="date" id="payment_start_date" name="payment_start_date" value="{{ asset.payment_start_date or '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="payment_frequency">Payment Frequency:</label>
+                    <select id="payment_frequency" name="payment_frequency">
+                        <option value="monthly" {{ 'selected' if asset.payment_frequency != 'biweekly' else '' }}>Monthly</option>
+                        <option value="biweekly" {{ 'selected' if asset.payment_frequency == 'biweekly' else '' }}>Bi-Weekly</option>
+                    </select>
+                </div>
+            </div>
+            <h3 class="form-section-title" id="escrow-section" style="{{ 'display:block' if asset.asset_type == 'real_estate' else 'display:none' }}">Escrow &amp; Additional Costs</h3>
+            <div class="form-row" id="escrow-row-1" style="{{ 'display:flex' if asset.asset_type == 'real_estate' else 'display:none' }}">
+                <div class="form-group">
+                    <label for="property_tax_annual">Property Tax (Annual):</label>
+                    <input type="number" id="property_tax_annual" name="property_tax_annual" value="{{ asset.property_tax_annual or '' }}" step="0.01">
+                    <small class="field-help">Annual property tax amount</small>
+                </div>
+                <div class="form-group">
+                    <label for="homeowners_insurance_annual">Homeowners Insurance (Annual):</label>
+                    <input type="number" id="homeowners_insurance_annual" name="homeowners_insurance_annual" value="{{ asset.homeowners_insurance_annual or '' }}" step="0.01">
+                    <small class="field-help">Annual insurance premium</small>
+                </div>
+            </div>
+            <div class="form-row" id="escrow-row-2" style="{{ 'display:flex' if asset.asset_type == 'real_estate' else 'display:none' }}">
+                <div class="form-group">
+                    <label for="pmi_monthly">PMI (Monthly):</label>
+                    <input type="number" id="pmi_monthly" name="pmi_monthly" value="{{ asset.pmi_monthly or '' }}" step="0.01">
+                    <small class="field-help">Private mortgage insurance</small>
+                </div>
+                <div class="form-group">
+                    <label for="hoa_monthly">HOA Fees (Monthly):</label>
+                    <input type="number" id="hoa_monthly" name="hoa_monthly" value="{{ asset.hoa_monthly or '' }}" step="0.01">
+                    <small class="field-help">Homeowners association dues</small>
+                </div>
+            </div>
+            <div class="form-row" id="escrow-row-3" style="{{ 'display:flex' if asset.asset_type == 'real_estate' else 'display:none' }}">
+                <div class="form-group">
+                    <label for="escrow_balance">Current Escrow Balance:</label>
+                    <input type="number" id="escrow_balance" name="escrow_balance" value="{{ asset.escrow_balance or '' }}" step="0.01">
+                    <small class="field-help">Current balance in your escrow account</small>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="payment_match">Auto-link payment descriptions:</label>
+                    <input type="text" id="payment_match" name="payment_match" value="{{ (asset.payment_match or [])|join(', ') }}" placeholder="e.g., Mortgage">
+                    <small style="color:#6c757d;">Comma-separated ledger descriptions that auto-link as loan payments (principal-only).</small>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="notes">Notes:</label>
+                    <textarea id="notes" name="notes">{{ asset.notes or '' }}</textarea>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit">Save Changes</button>
+                <a href="{{ url_for('assets_page') }}" class="cancel-btn">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function toggleAddressField(assetType) {
+            const addressRow = document.getElementById('address-row');
+            const escrowSection = document.getElementById('escrow-section');
+            const escrowRow1 = document.getElementById('escrow-row-1');
+            const escrowRow2 = document.getElementById('escrow-row-2');
+            const escrowRow3 = document.getElementById('escrow-row-3');
+            if (assetType === 'real_estate') {
+                addressRow.style.display = 'flex';
+                escrowSection.style.display = 'block';
+                escrowRow1.style.display = 'flex';
+                escrowRow2.style.display = 'flex';
+                escrowRow3.style.display = 'flex';
+            } else {
+                addressRow.style.display = 'none';
+                escrowSection.style.display = 'none';
+                escrowRow1.style.display = 'none';
+                escrowRow2.style.display = 'none';
+                escrowRow3.style.display = 'none';
+            }
+        }
+    </script>
+{% endblock %}

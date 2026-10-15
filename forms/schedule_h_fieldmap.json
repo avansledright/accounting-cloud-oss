@@ -1,0 +1,19 @@
+{
+  "_comment": "Default Schedule H field mappings. Visit /payroll/forms/inspect after placing the PDF to verify and override via forms/schedule_h_fieldmap_<year>.json if needed.",
+  "name":          "f1_01",
+  "ssn":           "f1_02",
+  "ein":           "f1_03",
+  "calendar_year": "f1_04",
+  "line_1a":       "f1_05",
+  "line_1b":       "f1_06",
+  "line_3":        "f1_07",
+  "line_4":        "f1_08",
+  "line_5":        "f1_09",
+  "line_6":        "f1_10",
+  "line_7":        "f1_11",
+  "line_8":        "f1_12",
+  "part2_futa_wages": "f1_20",
+  "part2_futa_tax":   "f1_21",
+  "part2_total":      "f1_22",
+  "total_tax":        "f1_30"
+}

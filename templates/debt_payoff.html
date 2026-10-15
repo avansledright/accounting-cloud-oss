@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Payoff Schedule</h1>
+    <p><a href="{{ url_for('debts_page') }}">&larr; Back to Debts</a></p>
+    <h2 style="color: #495057;">{{ debt.name }}
+        <span style="font-size: 0.7em; font-weight: normal; color: #6c757d;">
+            — {{ debt.debt_type|replace('_', ' ')|title }}
+        </span>
+    </h2>
+
+    {% if summary.deferred %}
+    <div class="comparison-card">
+        <h3>Deferment Active</h3>
+        <p>Payments begin {{ summary.deferment_end }}.
+        {% if debt.subsidized %}
+            This is a subsidized loan — no interest accrues during deferment.
+        {% else %}
+            Interest continues to accrue during deferment. Starting balance reflects accrued interest.
+        {% endif %}
+        </p>
+    </div>
+    {% endif %}
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card expenses">
+            <span class="summary-label">Starting Balance</span>
+            <span class="summary-amount">${{ "{:,.2f}".format(summary.starting_balance) }}</span>
+        </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white;">
+            <span class="summary-label">Monthly Payment</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.period_payment) }}</span>
+        </div>
+        <div class="summary-card negative">
+            <span class="summary-label">Total Interest</span>
+            <span class="summary-amount">${{ "{:,.2f}".format(summary.total_interest) }}</span>
+        </div>
+        <div class="summary-card investments">
+            <span class="summary-label">Payoff Date</span>
+            <span class="summary-amount">{{ summary.payoff_date }}</span>
+        </div>
+    </div>
+
+    {% if debt.interest_rate and debt.interest_rate > 0 %}
+    <div class="summary-cards">
+        <div class="summary-card" style="background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%); color: white;">
+            <span class="summary-label">Interest Rate</span>
+            <span class="summary-amount">{{ "%.2f"|format(debt.interest_rate) }}% APR</span>
+        </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #fd7e14 0%, #e06600 100%); color: white;">
+            <span class="summary-label">Total Cost</span>
+            <span class="summary-amount">${{ "{:,.2f}".format(summary.total_payments) }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Payment Schedule Table -->
+    <div class="asset-section">
+        <h2>Payment Schedule ({{ summary.periods }} payments)</h2>
+        <table class="asset-table amortization-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>Payment</th>
+                    <th>Principal</th>
+                    <th>Interest</th>
+                    <th>Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in schedule %}
+                <tr>
+                    <td data-label="#">{{ row.number }}</td>
+                    <td data-label="Date">{{ row.date }}</td>
+                    <td data-label="Payment">${{ "%.2f"|format(row.payment) }}</td>
+                    <td data-label="Principal">${{ "%.2f"|format(row.principal) }}</td>
+                    <td data-label="Interest">${{ "%.2f"|format(row.interest) }}</td>
+                    <td data-label="Balance">${{ "%.2f"|format(row.balance) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% endblock %}

@@ -1,0 +1,597 @@
+{% extends "base.html" %}
+
+{% block sidebar_filter %}
+    <div class="sidebar-filter">
+        <div class="sidebar-filter-label">Card</div>
+        <select id="card-select" onchange="applyFilters()">
+            <option value="all" {% if card_filter == 'all' %}selected{% endif %}>All Cards</option>
+            {% for card in all_cards %}
+            <option value="{{ card }}" {% if card_filter == card %}selected{% endif %}>{{ card }}</option>
+            {% endfor %}
+        </select>
+        <div class="sidebar-filter-label">Month</div>
+        <select id="month-select" onchange="selectMonth()">
+            <option value="" {% if not month_filter %}selected{% endif %}>All Months</option>
+            {% for m in all_months %}
+            <option value="{{ m }}" {% if month_filter == m %}selected{% endif %}>{{ m }}</option>
+            {% endfor %}
+        </select>
+        <div class="sidebar-filter-label">Date Range</div>
+        <input type="date" id="start-date" value="{{ start_date }}" onkeydown="if(event.key==='Enter')applyFilters()">
+        <input type="date" id="end-date" value="{{ end_date }}" onkeydown="if(event.key==='Enter')applyFilters()">
+        <button type="button" class="btn-apply" onclick="applyFilters()">Apply date range</button>
+        {% if start_date or end_date %}
+        <button type="button" class="btn-link" onclick="clearDateRange()">Clear date range</button>
+        {% endif %}
+        <div class="sidebar-filter-label">Category</div>
+        <select id="category-select" onchange="applyFilters()">
+            <option value="all" {% if category_filter == 'all' %}selected{% endif %}>All Categories</option>
+            {% for cat in cc_categories %}
+            <option value="{{ cat }}" {% if category_filter == cat %}selected{% endif %}>{{ cat }}</option>
+            {% endfor %}
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <h1>Credit Card Statements</h1>
+
+    <!-- Missing Statements (surfaced at the top so it's clear what needs uploading) -->
+    {% if missing_statements %}
+    <div class="data-entry" style="border-left: 4px solid #dc3545; background: #fff5f5;">
+        <h2 style="color:#842029;">⚠ Missing Statements — {{ missing_statements|sum(attribute='count') }} to upload</h2>
+        <p style="color:#6c757d; margin-top:-0.25rem;">
+            Gaps between each card's first uploaded statement and last month ({{ last_expected_month }}). Upload these to fill in your history.
+        </p>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Card</th>
+                    <th>Missing</th>
+                    <th>Months</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for m in missing_statements %}
+                <tr>
+                    <td data-label="Card">{{ m.card_name }}</td>
+                    <td data-label="Missing">{{ m.count }}</td>
+                    <td data-label="Months">
+                        {% for mo in m.months %}
+                        <span class="primary-tag" style="background:#f8d7da; color:#842029; margin:0 0.15rem 0.15rem 0; display:inline-block;">{{ mo }}</span>
+                        {% endfor %}
+                    </td>
+                    <td data-label="Actions">
+                        <button type="button" class="action-btn" onclick="startUpload('{{ m.card_name|e }}')">Upload &rarr;</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Upload Section (collapsible) -->
+    <div class="filter-bar">
+        <div class="transfer-header" onclick="this.classList.toggle('open'); this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+            <h2>Upload Statement</h2>
+            <span class="toggle-icon">&#9660;</span>
+        </div>
+        <div class="filter-body" style="display: none;">
+            {% if cards %}
+            <form method="POST" action="{{ url_for('cc_upload') }}" enctype="multipart/form-data" class="budget-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="card_id">Card</label>
+                        <select name="card_id" id="card_id" required>
+                            {% for c in cards %}
+                            <option value="{{ c._id }}">{{ c.name }} ({{ card_issuer_labels.get(c.issuer, 'Other') }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="cc_file">CSV File</label>
+                        <input type="file" name="file" id="cc_file" accept=".csv" required>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="action-btn export-btn">Upload</button>
+                </div>
+                <p style="color:#6c757d; font-size: 0.9rem; margin-top: 0.5rem;">
+                    The file will be saved as <code>&lt;card&gt;-YYYY-MM.csv</code> based on the statement month detected from the transactions.
+                </p>
+            </form>
+            {% else %}
+            <p style="color:#6c757d;">Add a card below before uploading a statement.</p>
+            {% endif %}
+
+            <h3 style="margin-top: 1.5rem;">Your Cards</h3>
+            <form method="POST" action="{{ url_for('cc_card_add') }}" class="budget-form" style="margin-bottom: 0.75rem;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="new_card_name">Card Name</label>
+                        <input type="text" name="name" id="new_card_name" placeholder="e.g. Chase Sapphire" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="new_card_issuer">Issuer / CSV Format</label>
+                        <select name="issuer" id="new_card_issuer">
+                            {% for value, label in card_issuers %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="action-btn">Add Card</button>
+                </div>
+            </form>
+            {% if cards %}
+            <table class="account-table">
+                <thead>
+                    <tr><th>Name</th><th>Issuer</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                    {% for c in cards %}
+                    <tr>
+                        <td data-label="Name">{{ c.name }}</td>
+                        <td data-label="Issuer">{{ card_issuer_labels.get(c.issuer, 'Other') }}</td>
+                        <td data-label="Actions">
+                            <form method="POST" action="{{ url_for('cc_card_delete') }}" style="display:inline;" onsubmit="return confirm('Delete card {{ c.name }}? Cards with statements still attached cannot be removed.');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <input type="hidden" name="card_id" value="{{ c._id }}">
+                                <button type="submit" class="action-btn delete-btn">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card expenses">
+            <span class="summary-label">Total Spending</span>
+            <span class="summary-amount">${{ "%.2f"|format(total_spending) }}</span>
+        </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #6f42c1, #5a32a3); color: white;">
+            <span class="summary-label">Transactions</span>
+            <span class="summary-amount">{{ transaction_count }}</span>
+        </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #17a2b8, #138496); color: white;">
+            <span class="summary-label">Top Category</span>
+            <span class="summary-amount" style="font-size: 1.1rem;">{{ top_category }}</span>
+        </div>
+        <div class="summary-card" style="background: linear-gradient(135deg, #fd7e14, #e8590c); color: white;">
+            <span class="summary-label">Avg Transaction</span>
+            <span class="summary-amount">${{ "%.2f"|format(avg_transaction) }}</span>
+        </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+        <div class="chart-card">
+            <h2>Spending by Category</h2>
+            <div class="chart-container">
+                <canvas id="ccCategoryChart"></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h2>Category Breakdown</h2>
+            <table class="account-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Amount</th>
+                        <th>% of Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cat, amount in sorted_categories %}
+                    <tr>
+                        <td data-label="Category">{{ cat }}</td>
+                        <td data-label="Amount">${{ "%.2f"|format(amount) }}</td>
+                        <td data-label="% of Total">{{ "%.1f"|format(amount / total_spending * 100 if total_spending else 0) }}%</td>
+                    </tr>
+                    {% endfor %}
+                    {% if sorted_categories %}
+                    <tr class="total-row">
+                        <td data-label="Category"><strong>Total</strong></td>
+                        <td data-label="Amount"><strong>${{ "%.2f"|format(total_spending) }}</strong></td>
+                        <td data-label="% of Total"><strong>100%</strong></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Savings Insights (collapsible) -->
+    <div class="filter-bar">
+        <div class="transfer-header" onclick="this.classList.toggle('open'); this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+            <h2>Savings Insights</h2>
+            <span class="toggle-icon">&#9660;</span>
+        </div>
+        <div class="filter-body" style="display: none;">
+            <div class="form-actions" style="margin-bottom: 1rem;">
+                <button class="action-btn export-btn" onclick="loadSavingsInsights('all')">Analyze All Spending</button>
+                <button class="action-btn" onclick="loadSavingsInsights('current')" style="background: linear-gradient(135deg, #17a2b8, #138496); color: white;">Analyze Current View</button>
+            </div>
+
+            <div id="insights-spinner" class="insights-spinner" style="display: none;">
+                <div class="spinner-ring"></div>
+                <span>Analyzing spending patterns...</span>
+            </div>
+
+            <div id="insights-results" style="display: none;">
+                <!-- Frequent Merchant Charges -->
+                <div id="insights-duplicates" class="insights-section" style="display: none;">
+                    <h3>Frequent Merchant Charges</h3>
+                    <p class="insights-subtitle">Merchants with 3+ charges in a single month</p>
+                    <table class="account-table" id="duplicates-table">
+                        <thead>
+                            <tr>
+                                <th>Merchant</th>
+                                <th>Month</th>
+                                <th>Count</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- Overlapping Subscriptions -->
+                <div id="insights-subscriptions" class="insights-section" style="display: none;">
+                    <h3>Overlapping Subscriptions</h3>
+                    <p class="insights-subtitle">Multiple services in the same category</p>
+                    <div id="subscriptions-cards"></div>
+                </div>
+
+                <!-- AI Savings Recommendations -->
+                <div id="insights-ai" class="insights-section" style="display: none;">
+                    <h3>AI Savings Recommendations</h3>
+                    <p class="insights-subtitle">Personalized tips based on your spending</p>
+                    <div id="ai-tips-cards"></div>
+                </div>
+
+                <div id="insights-empty" style="display: none; text-align: center; color: #6c757d; padding: 2rem;">
+                    No savings insights found for this data set.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transactions Table -->
+    <div class="data-entry">
+        <h2>Transactions</h2>
+        <table class="account-table cc-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Category</th>
+                    <th>Plan</th>
+                    <th>Card</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in transactions %}
+                <tr>
+                    <td data-label="Date">{{ t.date.strftime('%m/%d/%Y') }}</td>
+                    <td data-label="Description">{{ t.description }}</td>
+                    <td data-label="Amount" class="{% if t.amount < 0 %}positive-amount{% endif %}">
+                        {% if t.amount < 0 %}-{% endif %}${{ "%.2f"|format(t.amount|abs) }}
+                    </td>
+                    <td data-label="Category">
+                        <select class="cc-category-select{% if t.categorized_by == 'llm' %} llm-guess{% endif %}" data-id="{{ t._id }}" onchange="recategorize(this)">
+                            {% for cat in cc_categories %}
+                            <option value="{{ cat }}" {% if t.category == cat %}selected{% endif %}>{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if t.categorized_by == 'llm' %}<span class="llm-badge" title="Guessed by the local LLM because no rule matched. Worth a glance — correcting it clears the mark.">AI</span>{% endif %}
+                    </td>
+                    <td data-label="Plan">
+                        <select class="cc-plan-select" data-id="{{ t._id }}" onchange="linkPlan(this)">
+                            <option value="">—</option>
+                            {% for p in active_plans %}
+                            <option value="{{ p._id }}" {% if t.payment_plan_id == p._id %}selected{% endif %}>{{ p.vendor }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td data-label="Card">{{ t.card_name }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: #6c757d;">No transactions found. Upload a CSV statement to get started.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Statement Management -->
+    {% if statements %}
+    <div class="data-entry">
+        <h2>Uploaded Statements</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Card</th>
+                    <th>Period</th>
+                    <th>Transactions</th>
+                    <th>Total</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in statements %}
+                <tr>
+                    <td data-label="Card">{{ s._id.card_name }}</td>
+                    <td data-label="Period">{{ s._id.statement_date }}</td>
+                    <td data-label="Transactions">{{ s.count }}</td>
+                    <td data-label="Total">${{ "%.2f"|format(s.total) }}</td>
+                    <td data-label="Actions">
+                        {% if s.raw_filename %}
+                        <a class="action-btn" href="{{ url_for('cc_statement_raw', filename=s.raw_filename) }}">Download CSV</a>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('cc_delete_statement') }}" style="display:inline;" onsubmit="return confirm('Delete all {{ s.count }} transactions for {{ s._id.card_name }} ({{ s._id.statement_date }})?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="card_name" value="{{ s._id.card_name }}">
+                            <input type="hidden" name="statement_date" value="{{ s._id.statement_date }}">
+                            <button type="submit" class="action-btn delete-btn">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+
+        const categoryColors = [
+            '#007bff', '#28a745', '#dc3545', '#ffc107', '#17a2b8',
+            '#6f42c1', '#fd7e14', '#20c997', '#e83e8c', '#6c757d',
+            '#343a40', '#495057', '#0056b3', '#1e7e34', '#bd2130'
+        ];
+
+        // Open the upload panel, preselect the card, and jump to the file picker.
+        function startUpload(cardName) {
+            const header = document.querySelector('.filter-bar .transfer-header');
+            const body = header ? header.nextElementSibling : null;
+            if (header && body) {
+                header.classList.add('open');
+                body.style.display = 'block';
+            }
+            const select = document.getElementById('card_id');
+            if (select) {
+                for (const opt of select.options) {
+                    // Option label is "<name> (<issuer>)"; match on the name prefix.
+                    if (opt.text === cardName || opt.text.startsWith(cardName + ' (')) {
+                        select.value = opt.value;
+                        break;
+                    }
+                }
+            }
+            const file = document.getElementById('cc_file');
+            if (file) {
+                file.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                file.focus();
+            }
+        }
+
+        // Apply filters
+        function applyFilters() {
+            const card = document.getElementById('card-select').value;
+            const category = document.getElementById('category-select').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            // A date range spans statements, so it overrides the month filter.
+            const month = (startDate || endDate) ? '' : document.getElementById('month-select').value;
+            window.location.href = `{{ url_for('credit_cards_page') }}?card=${encodeURIComponent(card)}&month=${encodeURIComponent(month)}&category=${encodeURIComponent(category)}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`;
+        }
+
+        function clearDateRange() {
+            document.getElementById('start-date').value = '';
+            document.getElementById('end-date').value = '';
+            applyFilters();
+        }
+
+        // Picking a month clears any active date range (the two are mutually exclusive).
+        function selectMonth() {
+            document.getElementById('start-date').value = '';
+            document.getElementById('end-date').value = '';
+            applyFilters();
+        }
+
+        // Recategorize transaction
+        function recategorize(select) {
+            const tid = select.dataset.id;
+            const category = select.value;
+            fetch('{{ url_for("cc_recategorize") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ transaction_id: tid, category: category })
+            }).then(r => r.json()).then(data => {
+                if (!data.success) {
+                    alert('Failed to update category');
+                }
+            });
+        }
+
+        // Link transaction to a payment plan
+        function linkPlan(select) {
+            const tid = select.dataset.id;
+            const planId = select.value || null;
+            fetch('{{ url_for("cc_link_plan") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({ transaction_id: tid, plan_id: planId })
+            }).then(r => r.json()).then(data => {
+                if (!data.success) {
+                    alert('Failed to link plan');
+                }
+            });
+        }
+
+        // Load doughnut chart
+        function loadCategoryChart() {
+            const card = document.getElementById('card-select').value;
+            const month = document.getElementById('month-select').value;
+            const catFilter = document.getElementById('category-select').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            fetch(`{{ url_for('cc_spending_by_category') }}?card=${encodeURIComponent(card)}&month=${encodeURIComponent(month)}&category=${encodeURIComponent(catFilter)}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`)
+                .then(r => r.json())
+                .then(data => {
+                    const ctx = document.getElementById('ccCategoryChart').getContext('2d');
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: data.labels,
+                            datasets: [{
+                                data: data.data,
+                                backgroundColor: categoryColors.slice(0, data.labels.length),
+                                borderWidth: 2,
+                                borderColor: '#fff'
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            plugins: {
+                                legend: { position: 'right' },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                            const pct = ((context.parsed / total) * 100).toFixed(1);
+                                            return `${context.label}: $${context.parsed.toLocaleString(undefined, {minimumFractionDigits: 2})} (${pct}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                });
+        }
+
+        loadCategoryChart();
+
+        // Savings Insights
+        function loadSavingsInsights(scope) {
+            const card = document.getElementById('card-select').value;
+            const month = document.getElementById('month-select').value;
+            const catFilter = document.getElementById('category-select').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            const spinner = document.getElementById('insights-spinner');
+            const results = document.getElementById('insights-results');
+
+            spinner.style.display = 'flex';
+            results.style.display = 'none';
+
+            fetch(`{{ url_for('cc_savings_insights') }}?card=${encodeURIComponent(card)}&month=${encodeURIComponent(month)}&category=${encodeURIComponent(catFilter)}&scope=${scope}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`)
+                .then(r => r.json())
+                .then(data => {
+                    spinner.style.display = 'none';
+                    results.style.display = 'block';
+                    const hasDupes = renderDuplicates(data.duplicates);
+                    const hasSubs = renderSubscriptions(data.subscriptions);
+                    const hasTips = renderAiTips(data.ai_tips);
+                    document.getElementById('insights-empty').style.display =
+                        (!hasDupes && !hasSubs && !hasTips) ? 'block' : 'none';
+                })
+                .catch(() => {
+                    spinner.style.display = 'none';
+                    results.style.display = 'block';
+                    document.getElementById('insights-empty').style.display = 'block';
+                });
+        }
+
+        function renderDuplicates(dupes) {
+            const section = document.getElementById('insights-duplicates');
+            const tbody = document.querySelector('#duplicates-table tbody');
+            tbody.innerHTML = '';
+            if (!dupes || dupes.length === 0) {
+                section.style.display = 'none';
+                return false;
+            }
+            dupes.forEach(d => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td data-label="Merchant">${d.merchant}</td>
+                    <td data-label="Month">${d.month}</td>
+                    <td data-label="Count">${d.count}</td>
+                    <td data-label="Total">$${d.total.toFixed(2)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            section.style.display = 'block';
+            return true;
+        }
+
+        function renderSubscriptions(subs) {
+            const section = document.getElementById('insights-subscriptions');
+            const container = document.getElementById('subscriptions-cards');
+            container.innerHTML = '';
+            if (!subs || subs.length === 0) {
+                section.style.display = 'none';
+                return false;
+            }
+            subs.forEach(s => {
+                const services = s.services.map(svc =>
+                    `<span class="insights-service">${svc.name} <small>~$${svc.avg_monthly.toFixed(2)}/mo</small></span>`
+                ).join('');
+                const card = document.createElement('div');
+                card.className = 'insights-overlap-card';
+                card.innerHTML = `
+                    <h4>${s.group} <span class="insights-savings">$${s.total_monthly.toFixed(2)}/mo combined</span></h4>
+                    <div class="insights-services">${services}</div>
+                    <p class="insights-hint">${s.count} overlapping services &mdash; consider consolidating</p>
+                `;
+                container.appendChild(card);
+            });
+            section.style.display = 'block';
+            return true;
+        }
+
+        function renderAiTips(tips) {
+            const section = document.getElementById('insights-ai');
+            const container = document.getElementById('ai-tips-cards');
+            container.innerHTML = '';
+            if (!tips || tips.length === 0) {
+                section.style.display = 'none';
+                return false;
+            }
+            tips.forEach((tip, i) => {
+                const card = document.createElement('div');
+                card.className = 'insights-tip-card';
+                const savings = tip.potential_savings
+                    ? `<span class="insights-savings">${tip.potential_savings}</span>`
+                    : '';
+                card.innerHTML = `
+                    <h4>${i + 1}. ${tip.title} ${savings}</h4>
+                    <p>${tip.detail}</p>
+                `;
+                container.appendChild(card);
+            });
+            section.style.display = 'block';
+            return true;
+        }
+    </script>
+{% endblock %}

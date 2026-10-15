@@ -1,0 +1,13 @@
+# kubectl apply -k deploy/kubernetes   (create the Secret first, see secret.example.yaml)
+# ingress.yaml and mcp.yaml are deliberately NOT listed: add them once you have
+# put authentication in front of the app (ingress) and decided how to expose MCP.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - mongodb.yaml
+  - deployment.yaml
+  - backup-cronjob.yaml
+  # - ingress.yaml
+  # - mcp.yaml

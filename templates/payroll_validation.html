@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / Validation</div>
+    <h1>EFW2 Validation — {{ year }}</h1>
+
+    <div class="data-entry" style="border-left:4px solid {% if error_count %}#c66{% elif warning_count %}#e9a800{% else %}#4a7{% endif %};">
+        {% if error_count %}
+        <h2 style="color:#c66;">{{ error_count }} Error{{ 's' if error_count != 1 else '' }} — AccuWage will reject this file</h2>
+        <p>Fix these before uploading to SSA. You can still force-download the ZIP to inspect raw output, but do not submit to BSO until errors are resolved.</p>
+        {% elif warning_count %}
+        <h2 style="color:#a60;">{{ warning_count }} Warning{{ 's' if warning_count != 1 else '' }} — review before filing</h2>
+        <p>These won't block AccuWage but are worth double-checking.</p>
+        {% else %}
+        <h2 style="color:#4a7;">No issues found</h2>
+        <p>File passes local validation. Run <a href="https://www.ssa.gov/bso/" target="_blank">AccuWage Online</a> as a final check before uploading to BSO.</p>
+        {% endif %}
+    </div>
+
+    {% if issues %}
+    <div class="data-entry">
+        <h2>Issues</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>Code</th>
+                    <th>Record</th>
+                    <th>Line</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in issues %}
+                <tr style="background:{% if i.severity == 'error' %}#fdd{% else %}#fef6e0{% endif %};">
+                    <td><strong>{{ i.severity|upper }}</strong></td>
+                    <td><code>{{ i.code }}</code></td>
+                    <td>{{ i.record or '—' }}</td>
+                    <td>{{ i.line_no or '—' }}</td>
+                    <td>{{ i.message }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="data-entry">
+        <h2>Actions</h2>
+        {% if download_url %}
+            {% if error_count %}
+            <a href="{{ download_url }}" class="btn" onclick="return confirm('This file has {{ error_count }} validation error(s). Download anyway?');">Force Download ZIP</a>
+            {% else %}
+            <a href="{{ download_url }}" class="btn btn-primary">Download Year-End ZIP</a>
+            {% endif %}
+        {% endif %}
+        <a href="{{ url_for('payroll_page') }}" class="btn">Back to Payroll</a>
+        <a href="https://www.ssa.gov/bso/" target="_blank" class="btn">Open SSA BSO / AccuWage</a>
+    </div>
+
+    <div class="data-entry">
+        <h3>About This Validation</h3>
+        <p class="muted">Local validator implements a subset of SSA Publication 42-007 rules — record structure, field formats, SSN/EIN validation, state codes, math checks (SS 6.2%, Medicare 1.45%, RT totals match RW sums). It is not a substitute for SSA's AccuWage Online tool, which is the authoritative pre-submission validator. Use local validation for a fast feedback loop; run AccuWage as the final check before uploading your EFW2 file to BSO.</p>
+    </div>
+{% endblock %}

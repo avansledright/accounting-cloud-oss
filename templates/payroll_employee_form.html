@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / {{ 'Edit' if employee else 'New' }} Employee</div>
+    <h1>{{ 'Edit' if employee else 'Add' }} Household Employee</h1>
+
+    <form method="POST" class="data-entry">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <h2>Identity</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Name *</label>
+                <input type="text" name="name" required value="{{ employee.name if employee else '' }}">
+            </div>
+            <div class="form-group">
+                <label>SSN</label>
+                <input type="text" name="ssn" placeholder="XXX-XX-XXXX" value="{{ employee.ssn if employee else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Relationship</label>
+                <input type="text" name="relationship" placeholder="e.g., unrelated, parent, child" value="{{ employee.relationship if employee else '' }}">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group" style="flex:2;">
+                <label>Address</label>
+                <input type="text" name="address" value="{{ employee.address if employee else '' }}">
+            </div>
+            <div class="form-group">
+                <label>State (override)</label>
+                <input type="text" name="state" maxlength="2" placeholder="e.g. NY" value="{{ employee.state if employee else '' }}">
+            </div>
+        </div>
+
+        <h2>Employment</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Hire Date</label>
+                <input type="date" name="hire_date" value="{{ employee.hire_date.strftime('%Y-%m-%d') if employee and employee.hire_date and employee.hire_date.strftime is defined else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Termination Date</label>
+                <input type="date" name="termination_date" value="{{ employee.termination_date.strftime('%Y-%m-%d') if employee and employee.termination_date and employee.termination_date.strftime is defined else '' }}">
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" name="active" {% if not employee or employee.active %}checked{% endif %}> Active
+                </label>
+            </div>
+        </div>
+
+        <h2>Pay</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Pay Type</label>
+                <select name="pay_type">
+                    <option value="salary" {% if employee and employee.pay_type == 'salary' %}selected{% endif %}>Salary (fixed per period)</option>
+                    <option value="hourly" {% if employee and employee.pay_type == 'hourly' %}selected{% endif %}>Hourly</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Pay Rate</label>
+                <input type="number" step="0.01" name="pay_rate" value="{{ employee.pay_rate if employee else '' }}">
+            </div>
+            <div class="form-group">
+                <label>Frequency</label>
+                <select name="pay_frequency">
+                    {% for v, label in pay_frequencies %}
+                    <option value="{{ v }}" {% if employee and employee.pay_frequency == v %}selected{% elif not employee and v == 'monthly' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Funding Account</label>
+                <select name="funding_account_id">
+                    <option value="">—</option>
+                    {% for a in accounts %}
+                    <option value="{{ a._id }}" {% if employee and employee.funding_account_id and employee.funding_account_id|string == a._id|string %}selected{% endif %}>{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <h2>Withholding</h2>
+        <p class="muted">Federal and state income tax withholding is optional for household employees — only required if the employee requests it via W-4. Enter the flat per-period amount.</p>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Federal income tax / period</label>
+                <input type="number" step="0.01" name="fit_per_period" value="{{ employee.fit_per_period if employee else 0 }}">
+            </div>
+            <div class="form-group">
+                <label>State income tax / period</label>
+                <input type="number" step="0.01" name="sit_per_period" value="{{ employee.sit_per_period if employee else 0 }}">
+            </div>
+        </div>
+
+        <h2>FICA Exemption Flags</h2>
+        <p class="muted">FICA (Social Security + Medicare) rules have exemptions for certain household employees. Check only if applicable — see IRS Pub 926.</p>
+        <div class="form-row">
+            <div class="form-group">
+                <label><input type="checkbox" name="lives_with_employer" {% if employee and employee.lives_with_employer %}checked{% endif %}> Lives with employer</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" name="under_18" {% if employee and employee.under_18 %}checked{% endif %}> Under age 18</label>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group" style="flex:3;">
+                <label>Notes</label>
+                <textarea name="notes">{{ employee.notes if employee else '' }}</textarea>
+            </div>
+        </div>
+
+        <button type="submit">Save</button>
+        <a href="{{ url_for('payroll_page') }}" class="btn">Cancel</a>
+
+        {% if employee %}
+        <form method="POST" action="{{ url_for('payroll_employee_delete', employee_id=employee._id) }}" style="display:inline; margin-left:1rem;" onsubmit="return confirm('Delete this employee? Payroll entries will be kept.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn-danger">Delete Employee</button>
+        </form>
+        {% endif %}
+    </form>
+{% endblock %}

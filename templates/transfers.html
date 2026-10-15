@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Transfers</h1>
+
+    <!-- One-Time Transfer Form -->
+    <div class="data-entry">
+        <h2>New Transfer</h2>
+        <form method="POST" action="{{ url_for('add_transfer') }}" class="transfer-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="from_account_id">From Account:</label>
+                    <select id="from_account_id" name="from_account_id" required>
+                        <option value="">Select source account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}">{{ account.name }} (${{ "%.2f"|format(account.balance) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="to_account_id">To Account:</label>
+                    <select id="to_account_id" name="to_account_id" required>
+                        <option value="">Select destination account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}">{{ account.name }} (${{ "%.2f"|format(account.balance) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount:</label>
+                    <input type="number" id="amount" name="amount" placeholder="0.00" step="0.01" min="0.01" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="date">Date:</label>
+                    <input type="date" id="date" name="date" value="{{ today }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <input type="text" id="description" name="description" placeholder="e.g., Savings deposit">
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes:</label>
+                    <input type="text" id="notes" name="notes" placeholder="Optional notes">
+                </div>
+            </div>
+            <button type="submit">Transfer</button>
+        </form>
+    </div>
+
+    <!-- Recurring Transfers -->
+    <div class="data-entry">
+        <h2>New Recurring Transfer</h2>
+        <form method="POST" action="{{ url_for('add_recurring_transfer') }}" class="transfer-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="rt_from_account_id">From Account:</label>
+                    <select id="rt_from_account_id" name="from_account_id" required>
+                        <option value="">Select source account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}">{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rt_to_account_id">To Account:</label>
+                    <select id="rt_to_account_id" name="to_account_id" required>
+                        <option value="">Select destination account</option>
+                        {% for account in accounts %}
+                        <option value="{{ account._id }}">{{ account.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rt_amount">Amount:</label>
+                    <input type="number" id="rt_amount" name="amount" placeholder="0.00" step="0.01" min="0.01" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="rt_frequency">Frequency:</label>
+                    <select id="rt_frequency" name="frequency" required>
+                        <option value="weekly">Weekly</option>
+                        <option value="biweekly">Bi-Weekly (every 14 days)</option>
+                        <option value="monthly" selected>Monthly</option>
+                        <option value="bi-monthly">Bi-Monthly</option>
+                        <option value="yearly">Yearly</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rt_day_of_month">Day(s) of Month:</label>
+                    <input type="text" id="rt_day_of_month" name="day_of_month" placeholder="e.g., 1 or 1,15">
+                </div>
+                <div class="form-group">
+                    <label for="rt_start_date">Start Date:</label>
+                    <input type="date" id="rt_start_date" name="start_date" value="{{ today }}" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="rt_end_date">End Date:</label>
+                    <input type="date" id="rt_end_date" name="end_date">
+                </div>
+                <div class="form-group">
+                    <label for="rt_description">Description:</label>
+                    <input type="text" id="rt_description" name="description" placeholder="e.g., Monthly savings">
+                </div>
+                <div class="form-group">
+                    <label for="rt_notes">Notes:</label>
+                    <input type="text" id="rt_notes" name="notes" placeholder="Optional notes">
+                </div>
+            </div>
+            <button type="submit">Add Recurring Transfer</button>
+        </form>
+    </div>
+
+    <!-- Recurring Transfers Table -->
+    {% if recurring_transfers %}
+    <div class="account-section">
+        <h2>Recurring Transfers</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Amount</th>
+                    <th>Frequency</th>
+                    <th>Day(s)</th>
+                    <th>Monthly</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rt in recurring_transfers %}
+                <tr>
+                    <td data-label="Description">
+                        {{ rt.description }}
+                        {% if rt.notes %}<br><small class="item-notes">{{ rt.notes }}</small>{% endif %}
+                    </td>
+                    <td data-label="From">{{ rt.from_account_name }}</td>
+                    <td data-label="To">{{ rt.to_account_name }}</td>
+                    <td data-label="Amount">${{ "%.2f"|format(rt.amount) }}</td>
+                    <td data-label="Frequency">{{ rt.frequency|capitalize }}</td>
+                    <td data-label="Day(s)">{{ rt.day_of_month or '1' }}</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(rt.monthly_amount) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <a href="{{ url_for('edit_recurring_transfer', rt_id=rt._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_recurring_transfer', rt_id=rt._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this recurring transfer?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Transfer History -->
+    {% if transfers %}
+    <div class="account-section">
+        <h2>Transfer History</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>From</th>
+                    <th>To</th>
+                    <th>Amount</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for transfer in transfers %}
+                <tr>
+                    <td data-label="Date">{{ transfer.date }}</td>
+                    <td data-label="Description">
+                        {{ transfer.description }}
+                        {% if transfer.notes %}<br><small class="item-notes">{{ transfer.notes }}</small>{% endif %}
+                    </td>
+                    <td data-label="From">{{ transfer.from_account_name }}</td>
+                    <td data-label="To">{{ transfer.to_account_name }}</td>
+                    <td data-label="Amount" class="positive-amount">${{ "%.2f"|format(transfer.amount) }}</td>
+                    <td data-label="Actions" class="actions-cell">
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_transfer', transfer_id=transfer._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this transfer? This will reverse the balance changes.')">Reverse</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No transfers yet. Use the form above to transfer funds between accounts.</p>
+    </div>
+    {% endif %}
+
+{% endblock %}

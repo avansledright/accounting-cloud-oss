@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block content %}
+<nav class="breadcrumb" style="margin-bottom:1rem;">
+    <a href="{{ url_for('debts_page') }}">&larr; Debts</a>
+</nav>
+
+<h1>{{ debt.name }}
+    {% if debt.paid_off %}<span class="badge" style="background:#198754;color:#fff;font-size:0.45em;vertical-align:middle;">Paid off{% if debt.paid_off_date %} {{ debt.paid_off_date.strftime('%b %d, %Y') }}{% endif %}</span>{% endif %}
+</h1>
+<p style="color:#6c757d;margin-top:-0.5rem;">
+    {{ debt.debt_type|replace('_', ' ')|title }}{% if debt.creditor %} &middot; {{ debt.creditor }}{% endif %}
+</p>
+
+<div class="summary-cards">
+    <div class="summary-card expenses">
+        <span class="summary-label">Starting Balance</span>
+        <span class="summary-amount">${{ "%.2f"|format(debt.starting_balance) }}</span>
+    </div>
+    <div class="summary-card investments">
+        <span class="summary-label">Principal Paid</span>
+        <span class="summary-amount">${{ "%.2f"|format(debt.principal_paid) }}</span>
+    </div>
+    <div class="summary-card negative">
+        <span class="summary-label">Current Balance</span>
+        <span class="summary-amount">${{ "%.2f"|format(debt.current_balance) }}</span>
+    </div>
+    {% if show_interest %}
+    <div class="summary-card">
+        <span class="summary-label">Interest Paid</span>
+        <span class="summary-amount">${{ "%.2f"|format(debt.interest_paid) }}</span>
+    </div>
+    {% endif %}
+    <div class="summary-card">
+        <span class="summary-label">Rate / Min</span>
+        <span class="summary-amount">{{ "%.2f"|format(debt.interest_rate or 0) }}% &middot; ${{ "%.0f"|format(debt.minimum_payment or 0) }}</span>
+    </div>
+</div>
+
+<div style="background:#e9ecef;border-radius:4px;height:24px;overflow:hidden;margin:1rem 0;">
+    <div style="background:#28a745;height:100%;width:{{ '%.1f'|format(debt.progress_pct if debt.progress_pct <= 100 else 100) }}%;"></div>
+</div>
+
+<div class="data-entry">
+    <h2>Actions</h2>
+    <div class="form-actions" style="gap:0.5rem;">
+        <a href="{{ url_for('edit_debt', debt_id=debt._id) }}" class="action-btn edit-btn">Edit Debt</a>
+        {% if debt.current_balance and debt.minimum_payment %}
+        <a href="{{ url_for('debt_payoff_schedule', debt_id=debt._id) }}" class="action-btn verify-btn">Payoff Schedule</a>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Linked payments -->
+<div class="data-entry">
+    <h2>Payments</h2>
+    <p style="color:#6c757d;margin-top:-0.25rem;">Each linked ledger transaction lowers the current balance.</p>
+    {% if linked %}
+    <table class="account-table">
+        <thead>
+            <tr>
+                <th>Date</th><th>Description</th><th>Amount</th>
+                {% if show_interest %}<th>Interest</th>{% endif %}
+                <th>Principal</th><th>Balance After</th><th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in linked %}
+            <tr>
+                <td data-label="Date">{{ t.date.strftime('%m/%d/%Y') if t.date.strftime is defined else t.date }}</td>
+                <td data-label="Description">{{ t.description }} <span style="color:#6c757d;font-size:0.85em;">({{ t.account_name }})</span></td>
+                <td data-label="Amount">${{ "%.2f"|format(t.amount) }}</td>
+                {% if show_interest %}<td data-label="Interest" style="color:#6c757d;">${{ "%.2f"|format(t.interest) }}</td>{% endif %}
+                <td data-label="Principal">${{ "%.2f"|format(t.principal) }}</td>
+                <td data-label="Balance After" class="negative-balance">${{ "%.2f"|format(t.balance_after) }}</td>
+                <td data-label="Actions" class="actions-cell">
+                    <form class="inline-form" method="POST" action="{{ url_for('unlink_debt_transaction', debt_id=debt._id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="transaction_id" value="{{ t._id }}">
+                        <button type="submit" class="action-btn delete-btn">Unlink</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#6c757d;">No payments linked yet. Link a ledger transaction below to start paying this down.</p>
+    {% endif %}
+</div>
+
+<!-- Link a payment -->
+<div class="data-entry">
+    <h2>Link a Payment</h2>
+    {% if candidates %}
+    <form method="POST" action="{{ url_for('link_debt_transaction', debt_id=debt._id) }}" class="budget-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-row">
+            <div class="form-group full-width">
+                <label for="transaction_id">Ledger Transaction:</label>
+                <select id="transaction_id" name="transaction_id" required>
+                    {% for t in candidates %}
+                    <option value="{{ t._id }}">
+                        {{ t.date.strftime('%m/%d/%Y') if t.date.strftime is defined else t.date }} —
+                        {{ t.description }} ({{ t.account_name }}) — ${{ "%.2f"|format(t.amount) }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit">Link Payment</button>
+        </div>
+    </form>
+    {% else %}
+    <p style="color:#6c757d;">No unlinked expense transactions in the last 18 months. Add a transaction in the ledger first, then link it here.</p>
+    {% endif %}
+</div>
+{% endblock %}

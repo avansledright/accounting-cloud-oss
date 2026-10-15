@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>Accounting Cloud</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- Mobile header bar -->
+    <div class="mobile-header">
+        <button class="sidebar-toggle" aria-label="Toggle navigation">&#9776;</button>
+        <a href="{{ url_for('index') }}" class="mobile-brand">Accounting Cloud</a>
+    </div>
+
+    <!-- Sidebar overlay for mobile -->
+    <div class="sidebar-overlay"></div>
+
+    <!-- Sidebar navigation -->
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <a href="{{ url_for('index') }}" class="sidebar-brand">Accounting Cloud</a>
+        </div>
+
+        <div class="sidebar-nav">
+            <a href="{{ url_for('index') }}" class="sidebar-link{% if request.endpoint == 'index' %} active{% endif %}">
+                <span class="sidebar-icon">&#127969;</span> Dashboard
+            </a>
+            <a href="{{ url_for('ledger_page') }}" class="sidebar-link{% if request.endpoint == 'ledger_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128209;</span> Ledger
+            </a>
+            <a href="{{ url_for('budget_page') }}" class="sidebar-link{% if request.endpoint == 'budget_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128202;</span> Budget
+            </a>
+            <a href="{{ url_for('simulation_page') }}" class="sidebar-link{% if request.endpoint == 'simulation_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#129514;</span> Simulator
+            </a>
+            <a href="{{ url_for('accounts_page') }}" class="sidebar-link{% if request.endpoint == 'accounts_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#127974;</span> Accounts
+            </a>
+            <a href="{{ url_for('assets_page') }}" class="sidebar-link{% if request.endpoint == 'assets_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#127968;</span> Assets
+            </a>
+            <a href="{{ url_for('debts_page') }}" class="sidebar-link{% if request.endpoint == 'debts_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128179;</span> Debts
+            </a>
+            <a href="{{ url_for('home_move_page') }}" class="sidebar-link{% if request.endpoint == 'home_move_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#127976;</span> Home Move
+            </a>
+            <a href="{{ url_for('credit_cards_page') }}" class="sidebar-link{% if request.endpoint == 'credit_cards_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128179;</span> Cards
+            </a>
+            <a href="{{ url_for('portfolio_page') }}" class="sidebar-link{% if request.endpoint == 'portfolio_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128200;</span> Portfolio
+            </a>
+
+            <div class="sidebar-divider"></div>
+
+            <a href="{{ url_for('history_page') }}" class="sidebar-link{% if request.endpoint == 'history_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128197;</span> History
+            </a>
+            <a href="{{ url_for('transfers_page') }}" class="sidebar-link{% if request.endpoint == 'transfers_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128257;</span> Transfers
+            </a>
+            <a href="{{ url_for('goals_page') }}" class="sidebar-link{% if request.endpoint == 'goals_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#127919;</span> Goals
+            </a>
+            <a href="{{ url_for('analytics_page') }}" class="sidebar-link{% if request.endpoint == 'analytics_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128200;</span> Analytics
+            </a>
+            <a href="{{ url_for('calendar_page') }}" class="sidebar-link{% if request.endpoint == 'calendar_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128197;</span> Calendar
+            </a>
+            <a href="{{ url_for('networth_page') }}" class="sidebar-link{% if request.endpoint == 'networth_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#128176;</span> Net Worth
+            </a>
+            <a href="{{ url_for('benefits_page') }}" class="sidebar-link{% if request.endpoint == 'benefits_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#127894;</span> Benefits
+            </a>
+            <a href="{{ url_for('payroll_page') }}" class="sidebar-link{% if request.endpoint in ['payroll_page', 'payroll_run', 'payroll_settings_page', 'payroll_employee_form', 'payroll_w2', 'payroll_schedule_h'] %} active{% endif %}">
+                <span class="sidebar-icon">&#128100;</span> Payroll
+            </a>
+            <a href="{{ url_for('reports_page') }}" class="sidebar-link{% if request.endpoint == 'reports_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#129504;</span> Advisor
+            </a>
+            <a href="{{ url_for('admin_page') }}" class="sidebar-link{% if request.endpoint == 'admin_page' %} active{% endif %}">
+                <span class="sidebar-icon">&#9881;</span> Admin
+            </a>
+        </div>
+
+        {% block sidebar_filter %}{% endblock %}
+    </nav>
+
+    <div class="main-content">
+        {# Sidebar is hidden behind the hamburger on phones, so page-level
+           filters (account selector etc.) are re-rendered in a bar under the
+           header there. Empty for pages without a sidebar filter. #}
+        <div class="mobile-page-filter">{{ self.sidebar_filter() }}</div>
+        <div class="container">
+            {% block content %}{% endblock %}
+        </div>
+        <footer class="main-footer">
+            <div class="footer-container">
+                <span class="footer-text">Accounting Cloud</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='main.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Admin / Data Management</h1>
+
+    <!-- Data Export Section -->
+    <div class="admin-section">
+        <h2>Data Export</h2>
+        <p>Download backups of your financial data.</p>
+        <div class="export-buttons">
+            <a href="{{ url_for('export_data') }}" class="action-btn export-btn" download="accounting-backup.json">
+                Full Backup (JSON)
+            </a>
+            <a href="{{ url_for('export_transactions_csv') }}" class="action-btn export-btn" download="transactions.csv">
+                Export Transactions (CSV)
+            </a>
+            <a href="{{ url_for('export_recurring_csv') }}" class="action-btn export-btn" download="recurring.csv">
+                Export Recurring Bills (CSV)
+            </a>
+            <a href="{{ url_for('export_debts_csv') }}" class="action-btn export-btn" download="debts.csv">
+                Export Debts (CSV)
+            </a>
+            <a href="{{ url_for('export_assets_csv') }}" class="action-btn export-btn" download="assets.csv">
+                Export Assets (CSV)
+            </a>
+            <a href="{{ url_for('export_holdings_csv') }}" class="action-btn export-btn" download="holdings.csv">
+                Export Holdings (CSV)
+            </a>
+            <a href="{{ url_for('export_dividends_csv') }}" class="action-btn export-btn" download="dividends.csv">
+                Export Dividends (CSV)
+            </a>
+        </div>
+    </div>
+
+    <!-- Database Statistics Section -->
+    <div class="admin-section">
+        <h2>Database Statistics</h2>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <span class="stat-label">Transactions</span>
+                <span class="stat-value">{{ stats.transactions }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Recurring Bills</span>
+                <span class="stat-value">{{ stats.recurring_transactions }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Accounts</span>
+                <span class="stat-value">{{ stats.accounts }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Assets</span>
+                <span class="stat-value">{{ stats.assets }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Debts</span>
+                <span class="stat-value">{{ stats.debts }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Savings Goals</span>
+                <span class="stat-value">{{ stats.savings_goals }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Net Worth Snapshots</span>
+                <span class="stat-value">{{ stats.networth_snapshots }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Transfers</span>
+                <span class="stat-value">{{ stats.transfers }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Recurring Transfers</span>
+                <span class="stat-value">{{ stats.recurring_transfers }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">CC Transactions</span>
+                <span class="stat-value">{{ stats.cc_transactions }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Holdings</span>
+                <span class="stat-value">{{ stats.holdings }}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Dividends</span>
+                <span class="stat-value">{{ stats.dividends }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data Health -->
+    {% if health_issues %}
+    <div class="admin-section">
+        <h2>Data Health Issues</h2>
+        <div class="health-issues">
+            {% for issue in health_issues %}
+            <div class="health-issue-item">&#9888; {{ issue }}</div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Data Import Section -->
+    <div class="admin-section">
+        <h2>Data Import</h2>
+        <p><strong>Warning:</strong> Full backup import will <strong>replace all existing data</strong>. CSV imports can optionally clear the collection first.</p>
+
+        <h3>Full Backup (JSON)</h3>
+        <form method="POST" action="{{ url_for('import_data') }}" enctype="multipart/form-data" class="import-form" onsubmit="return confirm('Are you sure? This will DELETE ALL existing data and replace it with the backup file.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label for="import-file">Select Backup File (JSON):</label>
+                <input type="file" id="import-file" name="file" accept=".json,application/json" required>
+            </div>
+            <button type="submit" class="action-btn danger-btn">Import Data (Replace All)</button>
+        </form>
+
+        <div class="import-section">
+            <h3>Import Transactions CSV</h3>
+            <form method="POST" action="{{ url_for('import_transactions_csv') }}" enctype="multipart/form-data" class="import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <input type="file" name="file" accept=".csv" required>
+                    <label><input type="checkbox" name="clear" value="true"> Clear existing transactions first</label>
+                    <button type="submit" class="action-btn export-btn">Import</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="import-section">
+            <h3>Import Recurring Bills CSV</h3>
+            <form method="POST" action="{{ url_for('import_recurring_csv') }}" enctype="multipart/form-data" class="import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <input type="file" name="file" accept=".csv" required>
+                    <label><input type="checkbox" name="clear" value="true"> Clear existing recurring first</label>
+                    <button type="submit" class="action-btn export-btn">Import</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="import-section">
+            <h3>Import Debts CSV</h3>
+            <form method="POST" action="{{ url_for('import_debts_csv') }}" enctype="multipart/form-data" class="import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <input type="file" name="file" accept=".csv" required>
+                    <label><input type="checkbox" name="clear" value="true"> Clear existing debts first</label>
+                    <button type="submit" class="action-btn export-btn">Import</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="import-section">
+            <h3>Import Assets CSV</h3>
+            <form method="POST" action="{{ url_for('import_assets_csv') }}" enctype="multipart/form-data" class="import-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+                    <input type="file" name="file" accept=".csv" required>
+                    <label><input type="checkbox" name="clear" value="true"> Clear existing assets first</label>
+                    <button type="submit" class="action-btn export-btn">Import</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Bill Calendar</h1>
+
+    <!-- Month Navigation -->
+    <div class="calendar-nav">
+        <button id="prev-month" class="action-btn edit-btn">&larr; Previous</button>
+        <h2 id="current-month"></h2>
+        <button id="next-month" class="action-btn edit-btn">Next &rarr;</button>
+    </div>
+
+    <!-- Calendar Grid -->
+    <div class="calendar-container">
+        <div class="calendar-header">
+            <div class="calendar-day-name">Sun</div>
+            <div class="calendar-day-name">Mon</div>
+            <div class="calendar-day-name">Tue</div>
+            <div class="calendar-day-name">Wed</div>
+            <div class="calendar-day-name">Thu</div>
+            <div class="calendar-day-name">Fri</div>
+            <div class="calendar-day-name">Sat</div>
+        </div>
+        <div class="calendar-grid" id="calendar-grid">
+            <!-- Filled by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="calendar-legend">
+        <span class="legend-item"><span class="legend-dot expense"></span> Expense</span>
+        <span class="legend-item"><span class="legend-dot income"></span> Income</span>
+        <span class="legend-item"><span class="legend-dot autopay"></span> Auto-Pay</span>
+    </div>
+
+    <!-- Selected Day Detail -->
+    <div class="data-entry" id="day-detail" style="display: none;">
+        <h2 id="detail-date"></h2>
+        <div id="detail-events"></div>
+    </div>
+
+    <script>
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth() + 1;
+        let eventsData = [];
+
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                           'July', 'August', 'September', 'October', 'November', 'December'];
+
+        function updateMonthDisplay() {
+            document.getElementById('current-month').textContent = `${monthNames[currentMonth - 1]} ${currentYear}`;
+        }
+
+        function getDaysInMonth(year, month) {
+            return new Date(year, month, 0).getDate();
+        }
+
+        function getFirstDayOfMonth(year, month) {
+            return new Date(year, month - 1, 1).getDay();
+        }
+
+        function loadCalendar() {
+            updateMonthDisplay();
+
+            fetch(`{{ url_for('calendar_events_api') }}?year=${currentYear}&month=${currentMonth}`)
+                .then(response => response.json())
+                .then(events => {
+                    eventsData = events;
+                    renderCalendar(events);
+                });
+        }
+
+        function renderCalendar(events) {
+            const grid = document.getElementById('calendar-grid');
+            grid.innerHTML = '';
+
+            const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+            const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
+            const today = new Date();
+            const isCurrentMonth = today.getFullYear() === currentYear && today.getMonth() + 1 === currentMonth;
+
+            // Group events by day
+            const eventsByDay = {};
+            events.forEach(event => {
+                const day = parseInt(event.date.split('-')[2]);
+                if (!eventsByDay[day]) eventsByDay[day] = [];
+                eventsByDay[day].push(event);
+            });
+
+            // Empty cells before first day
+            for (let i = 0; i < firstDay; i++) {
+                const cell = document.createElement('div');
+                cell.className = 'calendar-cell empty';
+                grid.appendChild(cell);
+            }
+
+            // Day cells
+            for (let day = 1; day <= daysInMonth; day++) {
+                const cell = document.createElement('div');
+                cell.className = 'calendar-cell';
+
+                if (isCurrentMonth && day === today.getDate()) {
+                    cell.classList.add('today');
+                }
+
+                const dayNumber = document.createElement('span');
+                dayNumber.className = 'day-number';
+                dayNumber.textContent = day;
+                cell.appendChild(dayNumber);
+
+                // Add events
+                if (eventsByDay[day]) {
+                    const eventsContainer = document.createElement('div');
+                    eventsContainer.className = 'day-events';
+
+                    eventsByDay[day].forEach(event => {
+                        const eventEl = document.createElement('div');
+                        eventEl.className = `calendar-event ${event.type}`;
+                        if (event.auto_pay) eventEl.classList.add('autopay');
+                        eventEl.textContent = event.title;
+                        eventEl.title = `${event.title}: $${event.amount}`;
+                        eventsContainer.appendChild(eventEl);
+                    });
+
+                    cell.appendChild(eventsContainer);
+                    cell.classList.add('has-events');
+                    cell.onclick = () => showDayDetail(day, eventsByDay[day]);
+                }
+
+                grid.appendChild(cell);
+            }
+        }
+
+        function showDayDetail(day, events) {
+            const detailDiv = document.getElementById('day-detail');
+            const dateEl = document.getElementById('detail-date');
+            const eventsEl = document.getElementById('detail-events');
+
+            dateEl.textContent = `${monthNames[currentMonth - 1]} ${day}, ${currentYear}`;
+
+            let html = '<div class="detail-events-list">';
+            let totalExpenses = 0;
+            let totalIncome = 0;
+
+            events.forEach(event => {
+                const amount = event.amount;
+                if (event.type === 'expense') totalExpenses += amount;
+                else totalIncome += amount;
+
+                html += `
+                    <div class="detail-event ${event.type}">
+                        <span class="event-title">${event.title}</span>
+                        <span class="event-category">${event.category}</span>
+                        <span class="event-amount ${event.type === 'expense' ? 'negative-balance' : 'positive-amount'}">
+                            ${event.type === 'expense' ? '-' : '+'}$${amount.toFixed(2)}
+                        </span>
+                        ${event.auto_pay ? '<span class="autopay-badge">Auto-Pay</span>' : ''}
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+
+            // Summary
+            html += `
+                <div class="detail-summary">
+                    <div>Income: <span class="positive-amount">+$${totalIncome.toFixed(2)}</span></div>
+                    <div>Expenses: <span class="negative-balance">-$${totalExpenses.toFixed(2)}</span></div>
+                    <div><strong>Net: <span class="${totalIncome - totalExpenses >= 0 ? 'positive-amount' : 'negative-balance'}">$${(totalIncome - totalExpenses).toFixed(2)}</span></strong></div>
+                </div>
+            `;
+
+            eventsEl.innerHTML = html;
+            detailDiv.style.display = 'block';
+        }
+
+        // Navigation
+        document.getElementById('prev-month').onclick = () => {
+            currentMonth--;
+            if (currentMonth < 1) {
+                currentMonth = 12;
+                currentYear--;
+            }
+            loadCalendar();
+        };
+
+        document.getElementById('next-month').onclick = () => {
+            currentMonth++;
+            if (currentMonth > 12) {
+                currentMonth = 1;
+                currentYear++;
+            }
+            loadCalendar();
+        };
+
+        // Initialize
+        loadCalendar();
+    </script>
+{% endblock %}

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / Schedule H</div>
+    <h1>Schedule H — {{ year }}</h1>
+    <p class="muted">Schedule H (Form 1040) is filed with your personal income tax return to report household employment taxes. Values below aggregate all household employees.</p>
+
+    <div class="data-entry">
+        <h2>Part I — Social Security, Medicare, and Federal Income Taxes</h2>
+        <table class="data-table">
+            <tr><td>Line 1a — Total cash wages subject to SS tax</td><td>${{ "%.2f"|format(totals.cash_wages_fica) }}</td></tr>
+            <tr><td>Line 1b — SS tax (multiply 1a by 12.4%)</td><td>${{ "%.2f"|format(totals.ss_tax) }}</td></tr>
+            <tr><td>Line 3 — Total cash wages subject to Medicare</td><td>${{ "%.2f"|format(totals.cash_wages_fica) }}</td></tr>
+            <tr><td>Line 4 — Medicare tax (multiply line 3 by 2.9%)</td><td>${{ "%.2f"|format(totals.medicare_tax) }}</td></tr>
+            <tr><td>Line 5 — Total cash wages subject to Add'l Medicare</td><td>${{ "%.2f"|format(totals.addl_medicare_wages) }}</td></tr>
+            <tr><td>Line 6 — Additional Medicare tax withholding</td><td>${{ "%.2f"|format(totals.addl_medicare) }}</td></tr>
+            <tr><td>Line 7 — Federal income tax withheld</td><td>${{ "%.2f"|format(totals.fit_withheld) }}</td></tr>
+            <tr><td><strong>Line 8 — Total taxes (1b + 4 + 6 + 7)</strong></td><td><strong>${{ "%.2f"|format(totals.ss_tax + totals.medicare_tax + totals.addl_medicare + totals.fit_withheld) }}</strong></td></tr>
+        </table>
+    </div>
+
+    <div class="data-entry">
+        <h2>Part II — FUTA Tax</h2>
+        <table class="data-table">
+            <tr><td>Total cash wages subject to FUTA (up to $7,000/employee)</td><td>${{ "%.2f"|format(totals.futa_wages) }}</td></tr>
+            <tr><td>FUTA tax (0.6%)</td><td>${{ "%.2f"|format(totals.futa_tax) }}</td></tr>
+        </table>
+        <p class="muted">If you paid state unemployment tax in multiple states or paid late, use Section B instead of Section A of Part II.</p>
+    </div>
+
+    <div class="data-entry">
+        <h2>State Unemployment ({{ settings.state }})</h2>
+        <p>SUTA paid: <strong>${{ "%.2f"|format(totals.state_suta) }}</strong></p>
+        <p class="muted">Report and remit this to your state unemployment agency on their required schedule.</p>
+    </div>
+
+    <div class="data-entry">
+        <h2>Per-Employee Summary</h2>
+        {% if per_emp %}
+        <table class="data-table">
+            <thead>
+                <tr><th>Employee</th><th>Total Gross</th><th>FICA-Eligible Wages</th></tr>
+            </thead>
+            <tbody>
+                {% for emp in per_emp %}
+                <tr>
+                    <td>{{ emp.name }}</td>
+                    <td>${{ "%.2f"|format(emp.gross) }}</td>
+                    <td>${{ "%.2f"|format(emp.fica_wages) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No payroll for {{ year }} yet.</p>
+        {% endif %}
+    </div>
+
+    <div class="data-entry">
+        <h2>Total Household Employment Tax</h2>
+        <p style="font-size:1.2rem;"><strong>${{ "%.2f"|format(totals.total_household_tax) }}</strong></p>
+        <p class="muted">Add this to Schedule 2 of Form 1040 when filing your personal return.</p>
+    </div>
+
+    <div class="breadcrumbs">
+        <a href="{{ url_for('payroll_schedule_h', year=year-1) }}">&larr; {{ year - 1 }}</a>
+        &nbsp;|&nbsp;
+        <a href="{{ url_for('payroll_schedule_h', year=year+1) }}">{{ year + 1 }} &rarr;</a>
+    </div>
+{% endblock %}

@@ -1,0 +1,372 @@
+{% extends "base.html" %}
+
+{% block sidebar_filter %}
+    <div class="sidebar-filter">
+        <div class="sidebar-filter-label">Month</div>
+        <select onchange="window.location.href='{{ url_for('budget_page') }}?month='+this.value">
+            {% for m in available_months %}
+            <option value="{{ m }}" {{ 'selected' if m == selected_month else '' }}>{{ m }}</option>
+            {% endfor %}
+            {% if selected_month not in available_months %}
+            <option value="{{ selected_month }}" selected>{{ selected_month }}</option>
+            {% endif %}
+        </select>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <h1>Budget Management</h1>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card income">
+            <span class="summary-label">Monthly Income</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.monthly_income) }}</span>
+        </div>
+        <div class="summary-card expenses">
+            <span class="summary-label">Monthly Expenses</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.monthly_expenses) }}</span>
+        </div>
+        <div class="summary-card {{ 'positive' if summary.monthly_net >= 0 else 'negative' }}">
+            <span class="summary-label">Monthly Net</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.monthly_net) }}</span>
+        </div>
+    </div>
+
+    <!-- Annual Overview -->
+    <div class="data-entry">
+        <h2>Annual Overview</h2>
+        <div class="annual-summary">
+            <div class="annual-item">
+                <span>Annual Income:</span>
+                <span class="positive-amount">${{ "%.2f"|format(summary.annual_income) }}</span>
+            </div>
+            <div class="annual-item">
+                <span>Annual Expenses:</span>
+                <span class="negative-balance">${{ "%.2f"|format(summary.annual_expenses) }}</span>
+            </div>
+            <div class="annual-item total">
+                <span>Annual Net:</span>
+                <span class="{{ 'positive-amount' if summary.annual_net >= 0 else 'negative-balance' }}">${{ "%.2f"|format(summary.annual_net) }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Category Breakdown with Budget Targets -->
+    <div class="data-entry">
+        <h2>Category Breakdown & Targets</h2>
+        <form method="POST" action="{{ url_for('set_budget_targets') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="month" value="{{ selected_month }}">
+            <table class="budget-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Planned</th>
+                        <th>CC Actual</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for category in categories %}
+                    {% set cat_data = category_totals.get(category, {'planned': 0, 'actual': 0, 'target': 0}) %}
+                    <tr>
+                        <td data-label="Category">{{ category }}</td>
+                        <td data-label="Planned">${{ "%.2f"|format(cat_data.planned) }}</td>
+                        <td data-label="CC Actual">${{ "%.2f"|format(cat_data.actual) }}</td>
+                        <td data-label="Target">
+                            <input type="number" name="target_{{ category }}" value="{{ budget_targets.get(category, '') }}" placeholder="Set target" step="0.01" class="target-input {% if budget_targets.get(category) != default_targets.get(category) %}overridden{% endif %}">
+                        </td>
+                        <td data-label="Status">
+                            {% if budget_targets.get(category) %}
+                                {% set compare_val = cat_data.actual if cat_data.actual > 0 else cat_data.planned %}
+                                {% if category in ['Savings', 'Investments'] %}
+                                    {% if compare_val >= budget_targets.get(category) %}
+                                        <span class="status-badge on-track">On Track</span>
+                                    {% else %}
+                                        <span class="status-badge off-track">Off Track</span>
+                                    {% endif %}
+                                {% else %}
+                                    {% if compare_val <= budget_targets.get(category) %}
+                                        <span class="status-badge on-track">On Track</span>
+                                    {% else %}
+                                        <span class="status-badge over-budget">Over Budget</span>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                <span class="status-badge no-target">No Target</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            <button type="submit" class="save-targets-btn">Save for {{ selected_month }}</button>
+            <button type="button" class="save-targets-btn" style="background-color:#6f42c1" onclick="if(confirm('Save these targets as the default template for ALL months?')){var f=this.closest('form');f.action='{{ url_for('set_default_targets') }}';f.submit()}">Save as Default Template</button>
+        </form>
+        {% if not default_targets %}
+        <form method="POST" action="{{ url_for('seed_targets_from_recurring') }}" style="display:inline; margin-top:0.5rem">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="save-targets-btn" onclick="return confirm('Set default template targets from your recurring bill amounts?')">Seed from Recurring</button>
+        </form>
+        {% endif %}
+        {% if month_has_overrides %}
+        <form method="POST" action="{{ url_for('reset_month_targets') }}" style="display:inline; margin-top:0.5rem">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="month" value="{{ selected_month }}">
+            <button type="submit" class="save-targets-btn" style="background-color:#dc3545" onclick="return confirm('Reset this month to default template targets?')">Reset to Template</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <!-- Add Budget Item Form -->
+    <div class="data-entry">
+        <h2>Add Budget Item</h2>
+        <form method="POST" action="{{ url_for('add_budget_item') }}" class="budget-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="description">Description:</label>
+                    <input type="text" id="description" name="description" placeholder="e.g., Mortgage" required>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount:</label>
+                    <input type="number" id="amount" name="amount" placeholder="0.00" step="0.01" required>
+                </div>
+                <div class="form-group">
+                    <label for="transaction_type">Type:</label>
+                    <select id="transaction_type" name="transaction_type" onchange="updateCategories(this.value)">
+                        <option value="expense">Expense</option>
+                        <option value="income">Income</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category:</label>
+                    <select id="category" name="category">
+                        {% for cat in categories %}
+                        <option value="{{ cat }}">{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="frequency">Frequency:</label>
+                    <select id="frequency" name="frequency">
+                        <option value="weekly">Weekly</option>
+                        <option value="biweekly">Bi-Weekly (every 14 days)</option>
+                        <option value="monthly" selected>Monthly</option>
+                        <option value="bi-monthly">Bi-Monthly</option>
+                        <option value="yearly">Yearly</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="day_of_month">Day(s) of Month:</label>
+                    <input type="text" id="day_of_month" name="day_of_month" placeholder="e.g., 1 or 1,15" required>
+                </div>
+                <div class="form-group">
+                    <label for="start_date">Start Date:</label>
+                    <input type="date" id="start_date" name="start_date" required>
+                </div>
+                <div class="form-group">
+                    <label for="end_date">End Date:</label>
+                    <input type="date" id="end_date" name="end_date">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="account_id">Account:</label>
+                    <select id="account_id" name="account_id">
+                        <option value="">-- Default (Primary) --</option>
+                        {% for acc in accounts %}
+                        <option value="{{ acc._id }}">{{ acc.name }}{% if acc.is_primary %} (Primary){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="payment_method">Payment Method:</label>
+                    <input type="text" id="payment_method" name="payment_method" placeholder="e.g., Main Checking">
+                </div>
+                <div class="form-group">
+                    <label for="account_number">Account #:</label>
+                    <input type="text" id="account_number" name="account_number" placeholder="Last 4 digits">
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="auto_pay" name="auto_pay">
+                        Auto-Pay Enabled
+                    </label>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label for="notes">Notes:</label>
+                    <textarea id="notes" name="notes" placeholder="Additional notes..."></textarea>
+                </div>
+            </div>
+            <button type="submit">Add Budget Item</button>
+        </form>
+    </div>
+
+    <!-- Budget Items by Category -->
+    <div class="budget-list">
+        <h2>Budget Items</h2>
+
+        {% for category in categories + income_categories %}
+        {% set items = recurring_transactions | selectattr('category', 'equalto', category) | list %}
+        {% if items %}
+        <div class="category-section">
+            <h3>{{ category }}</h3>
+            <table class="budget-table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Monthly</th>
+                        <th>Annual</th>
+                        <th>Account</th>
+                        <th>Day(s)</th>
+                        <th>Auto-Pay</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td data-label="Description">
+                            {{ item.description }}
+                            {% if item.notes %}<br><small class="item-notes">{{ item.notes }}</small>{% endif %}
+                        </td>
+                        <td data-label="Amount" class="{{ 'negative-balance' if item.transaction_type == 'expense' else 'positive-amount' }}">
+                            {{ '-' if item.transaction_type == 'expense' else '+' }}${{ "%.2f"|format(item.amount) }}
+                        </td>
+                        <td data-label="Monthly">${{ "%.2f"|format(item.monthly_amount) }}</td>
+                        <td data-label="Annual">${{ "%.2f"|format(item.annual_amount) }}</td>
+                        <td data-label="Account">{{ item.account_name or 'Primary' }}</td>
+                        <td data-label="Day(s)">{{ item.day_of_month or 'N/A' }}</td>
+                        <td data-label="Auto-Pay">{{ 'Yes' if item.auto_pay else 'No' }}</td>
+                        <td data-label="Actions" class="actions-cell">
+                            {% if item.is_transfer %}
+                            <a href="{{ url_for('transfers_page') }}" class="action-btn edit-btn">Edit</a>
+                            {% else %}
+                            <a href="{{ url_for('edit_budget_item', item_id=item._id) }}" class="action-btn edit-btn">Edit</a>
+                            <form class="inline-form" method="POST" action="{{ url_for('delete_budget_item', item_id=item._id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this item?')">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        <!-- Uncategorized Items -->
+        {% set uncategorized = recurring_transactions | rejectattr('category') | list %}
+        {% if uncategorized %}
+        <div class="category-section">
+            <h3>Uncategorized</h3>
+            <table class="budget-table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Monthly</th>
+                        <th>Annual</th>
+                        <th>Account</th>
+                        <th>Day(s)</th>
+                        <th>Auto-Pay</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in uncategorized %}
+                    <tr>
+                        <td data-label="Description">
+                            {{ item.description }}
+                            {% if item.notes %}<br><small class="item-notes">{{ item.notes }}</small>{% endif %}
+                        </td>
+                        <td data-label="Amount" class="{{ 'negative-balance' if item.transaction_type == 'expense' else 'positive-amount' }}">
+                            {{ '-' if item.transaction_type == 'expense' else '+' }}${{ "%.2f"|format(item.amount) }}
+                        </td>
+                        <td data-label="Monthly">${{ "%.2f"|format(item.monthly_amount) }}</td>
+                        <td data-label="Annual">${{ "%.2f"|format(item.annual_amount) }}</td>
+                        <td data-label="Account">{{ item.account_name or 'Primary' }}</td>
+                        <td data-label="Day(s)">{{ item.day_of_month or 'N/A' }}</td>
+                        <td data-label="Auto-Pay">{{ 'Yes' if item.auto_pay else 'No' }}</td>
+                        <td data-label="Actions" class="actions-cell">
+                            {% if item.is_transfer %}
+                            <a href="{{ url_for('transfers_page') }}" class="action-btn edit-btn">Edit</a>
+                            {% else %}
+                            <a href="{{ url_for('edit_budget_item', item_id=item._id) }}" class="action-btn edit-btn">Edit</a>
+                            <form class="inline-form" method="POST" action="{{ url_for('delete_budget_item', item_id=item._id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this item?')">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <!-- Archived Items (e.g. payments for loans the ledger shows paid off) -->
+        {% if archived_items %}
+        <details class="category-section">
+            <summary><h3 style="display:inline;">Archived ({{ archived_items|length }})</h3>
+                <small class="item-notes">Not counted in the budget or projected in the ledger</small></summary>
+            <table class="budget-table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                        <th>Monthly</th>
+                        <th>Reason</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in archived_items %}
+                    <tr>
+                        <td data-label="Description">{{ item.description }}</td>
+                        <td data-label="Amount">${{ "%.2f"|format(item.amount) }}</td>
+                        <td data-label="Monthly">${{ "%.2f"|format(item.monthly_amount) }}</td>
+                        <td data-label="Reason">
+                            {% if item.archived_reason == 'paid_off' %}
+                            Paid off{% if item.loan_name %} &middot; {{ item.loan_name }}{% endif %}{% if item.archived_at %} ({{ item.archived_at.strftime('%b %d, %Y') }}){% endif %}
+                            <br><small class="item-notes">Restores automatically if the loan's balance reopens</small>
+                            {% else %}
+                            Archived
+                            {% endif %}
+                        </td>
+                        <td data-label="Actions" class="actions-cell">
+                            <form class="inline-form" method="POST" action="{{ url_for('delete_budget_item', item_id=item._id) }}">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this item?')">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </details>
+        {% endif %}
+    </div>
+
+    <script>
+        const expenseCategories = {{ categories | tojson }};
+        const incomeCategories = {{ income_categories | tojson }};
+
+        function updateCategories(type) {
+            const select = document.getElementById('category');
+            const categories = type === 'income' ? incomeCategories : expenseCategories;
+            select.innerHTML = categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+        }
+    </script>
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="breadcrumbs"><a href="{{ url_for('payroll_page') }}">Payroll</a> / W-2</div>
+    <h1>W-2 for {{ employee.name }} — {{ year }}</h1>
+    <p class="muted">Use these values to prepare Form W-2 (and W-3) for the employee. File with the SSA by January 31.</p>
+
+    <div class="data-entry">
+        <h2>Employer (Boxes b, c)</h2>
+        <p><strong>{{ settings.employer_name }}</strong><br>
+           EIN: {{ settings.employer_ein }}<br>
+           {{ settings.employer_address }}</p>
+
+        <h2>Employee (Boxes a, e, f)</h2>
+        <p><strong>{{ employee.name }}</strong><br>
+           SSN: {{ employee.ssn or '—' }}<br>
+           {{ employee.address or '' }}</p>
+
+        <h2>W-2 Box Values</h2>
+        <table class="data-table">
+            <tr><td>Box 1 — Wages, tips, other compensation</td><td>${{ "%.2f"|format(totals.gross) }}</td></tr>
+            <tr><td>Box 2 — Federal income tax withheld</td><td>${{ "%.2f"|format(totals.fit) }}</td></tr>
+            <tr><td>Box 3 — Social Security wages</td><td>${{ "%.2f"|format(totals.ss_wages) }}</td></tr>
+            <tr><td>Box 4 — Social Security tax withheld</td><td>${{ "%.2f"|format(totals.ss_tax) }}</td></tr>
+            <tr><td>Box 5 — Medicare wages and tips</td><td>${{ "%.2f"|format(totals.medicare_wages) }}</td></tr>
+            <tr><td>Box 6 — Medicare tax withheld</td><td>${{ "%.2f"|format(totals.medicare_tax) }}</td></tr>
+            <tr><td>Box 16 — State wages</td><td>${{ "%.2f"|format(totals.gross) }}</td></tr>
+            <tr><td>Box 17 — State income tax</td><td>${{ "%.2f"|format(totals.sit) }}</td></tr>
+        </table>
+
+        <h2>Employer Tax Summary (for Schedule H)</h2>
+        <table class="data-table">
+            <tr><td>Employer Social Security</td><td>${{ "%.2f"|format(totals.er_ss) }}</td></tr>
+            <tr><td>Employer Medicare</td><td>${{ "%.2f"|format(totals.er_medicare) }}</td></tr>
+            <tr><td>FUTA</td><td>${{ "%.2f"|format(totals.er_futa) }}</td></tr>
+            <tr><td>SUTA ({{ settings.state }})</td><td>${{ "%.2f"|format(totals.er_suta) }}</td></tr>
+            <tr><td>Net Pay (already disbursed)</td><td>${{ "%.2f"|format(totals.net) }}</td></tr>
+        </table>
+    </div>
+
+    <div class="data-entry">
+        <h2>Pay Runs</h2>
+        {% if entries %}
+        <table class="data-table">
+            <thead>
+                <tr><th>Pay Date</th><th>Period</th><th>Gross</th><th>Net</th></tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr>
+                    <td>{{ e.pay_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ e.period_start.strftime('%m/%d') }} – {{ e.period_end.strftime('%m/%d') }}</td>
+                    <td>${{ "%.2f"|format(e.gross_wages or 0) }}</td>
+                    <td>${{ "%.2f"|format(e.net_pay or 0) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No payroll runs for {{ year }}.</p>
+        {% endif %}
+    </div>
+
+    <div class="breadcrumbs">
+        <a href="{{ url_for('payroll_w2', employee_id=employee._id, year=year-1) }}">&larr; {{ year - 1 }}</a>
+        &nbsp;|&nbsp;
+        <a href="{{ url_for('payroll_w2', employee_id=employee._id, year=year+1) }}">{{ year + 1 }} &rarr;</a>
+    </div>
+{% endblock %}

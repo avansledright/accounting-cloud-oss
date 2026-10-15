@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Amortization Schedule</h1>
+    <p><a href="{{ url_for('assets_page') }}">&larr; Back to Assets</a></p>
+    <h2 style="color: #495057;">{{ asset.name }}
+        <span style="font-size: 0.7em; font-weight: normal; color: #6c757d;">
+            — {{ 'Bi-Weekly' if summary.frequency == 'biweekly' else 'Monthly' }}
+        </span>
+    </h2>
+
+    <!-- Mortgage Summary -->
+    {% if mortgage_position %}
+    <div class="asset-section">
+        <h2>Mortgage Summary</h2>
+        <div class="summary-cards">
+            <div class="summary-card investments">
+                <span class="summary-label">Original Loan</span>
+                <span class="summary-amount">${{ "{:,.2f}".format(mortgage_position.original_balance) }}</span>
+                <small style="opacity: 0.8; margin-top: 0.25rem;">Started {{ mortgage_position.start_date }}</small>
+            </div>
+            <div class="summary-card expenses">
+                <span class="summary-label">Loan Progress</span>
+                <span class="summary-amount">{{ mortgage_position.percent_complete }}%</span>
+                <small style="opacity: 0.8; margin-top: 0.25rem;">{{ mortgage_position.payments_made }} of {{ mortgage_position.total_payments }} payments</small>
+            </div>
+            <div class="summary-card income">
+                <span class="summary-label">Equity Built</span>
+                <span class="summary-amount">{{ mortgage_position.equity_percent }}%</span>
+            </div>
+            <div class="summary-card" style="background: linear-gradient(135deg, #17a2b8 0%, #117a8b 100%); color: white;">
+                <span class="summary-label">Loan Terms</span>
+                <span class="summary-amount">{{ "%.2f"|format(asset.interest_rate) }}% APR</span>
+                <small style="opacity: 0.8; margin-top: 0.25rem;">{{ (asset.loan_term_months / 12)|int }}-year term</small>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Payment Frequency Comparison -->
+    {% if comparison and comparison.interest_saved > 0 %}
+    <div class="comparison-card">
+        {% if comparison.is_alternative %}
+            <h3>Switch to Bi-Weekly Payments</h3>
+            <p>By splitting your monthly payment in half and paying every two weeks, you could:</p>
+            <ul class="comparison-benefits">
+                <li>Save <strong>${{ "{:,.2f}".format(comparison.interest_saved) }}</strong> in interest</li>
+                <li>Pay off your loan <strong>{{ comparison.time_saved_months|int }} months</strong> earlier</li>
+            </ul>
+        {% else %}
+            <h3>Bi-Weekly Payment Savings</h3>
+            <p>Your bi-weekly payment schedule is saving you:</p>
+            <ul class="comparison-benefits">
+                <li><strong>${{ "{:,.2f}".format(comparison.interest_saved) }}</strong> in interest vs. monthly payments</li>
+                <li><strong>{{ comparison.time_saved_months|int }} months</strong> shorter loan term</li>
+            </ul>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Payment Breakdown Cards -->
+    <div class="summary-cards">
+        <div class="summary-card" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white;">
+            <span class="summary-label">P&I per Payment</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.period_payment) }}</span>
+        </div>
+        {% if summary.monthly_escrow > 0 %}
+        <div class="summary-card" style="background: linear-gradient(135deg, #fd7e14 0%, #e06600 100%); color: white;">
+            <span class="summary-label">Escrow per Payment</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.period_escrow) }}</span>
+        </div>
+        <div class="summary-card income">
+            <span class="summary-label">Total Payment</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total_period_payment) }}</span>
+        </div>
+        {% endif %}
+        <div class="summary-card negative">
+            <span class="summary-label">Total Interest</span>
+            <span class="summary-amount">${{ "{:,.2f}".format(summary.total_interest) }}</span>
+        </div>
+        <div class="summary-card investments">
+            <span class="summary-label">Payoff Date</span>
+            <span class="summary-amount">{{ summary.payoff_date }}</span>
+        </div>
+    </div>
+
+    <!-- Escrow Breakdown -->
+    {% if summary.monthly_escrow > 0 %}
+    <div class="asset-section">
+        <h2>Escrow Breakdown</h2>
+        {% if summary.escrow_balance > 0 %}
+        <p class="section-description">Current escrow balance: <strong>${{ "{:,.2f}".format(summary.escrow_balance) }}</strong>. Monthly escrow components collected with each payment.</p>
+        {% else %}
+        <p class="section-description">Monthly escrow components collected with each payment.</p>
+        {% endif %}
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>Component</th>
+                    <th>Monthly</th>
+                    <th>Annual</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if summary.escrow_components.property_tax > 0 %}
+                <tr>
+                    <td data-label="Component">Property Tax</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(summary.escrow_components.property_tax) }}</td>
+                    <td data-label="Annual">${{ "%.2f"|format(summary.escrow_components.property_tax * 12) }}</td>
+                </tr>
+                {% endif %}
+                {% if summary.escrow_components.homeowners_insurance > 0 %}
+                <tr>
+                    <td data-label="Component">Homeowners Insurance</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(summary.escrow_components.homeowners_insurance) }}</td>
+                    <td data-label="Annual">${{ "%.2f"|format(summary.escrow_components.homeowners_insurance * 12) }}</td>
+                </tr>
+                {% endif %}
+                {% if summary.escrow_components.pmi > 0 %}
+                <tr>
+                    <td data-label="Component">PMI</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(summary.escrow_components.pmi) }}</td>
+                    <td data-label="Annual">${{ "%.2f"|format(summary.escrow_components.pmi * 12) }}</td>
+                </tr>
+                {% endif %}
+                {% if summary.escrow_components.hoa > 0 %}
+                <tr>
+                    <td data-label="Component">HOA Fees</td>
+                    <td data-label="Monthly">${{ "%.2f"|format(summary.escrow_components.hoa) }}</td>
+                    <td data-label="Annual">${{ "%.2f"|format(summary.escrow_components.hoa * 12) }}</td>
+                </tr>
+                {% endif %}
+                <tr class="total-row">
+                    <td data-label="Component"><strong>Total Escrow</strong></td>
+                    <td data-label="Monthly"><strong>${{ "%.2f"|format(summary.monthly_escrow) }}</strong></td>
+                    <td data-label="Annual"><strong>${{ "%.2f"|format(summary.monthly_escrow * 12) }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Amortization Table -->
+    <div class="asset-section">
+        <h2>Payment Schedule ({{ summary.periods }} payments)</h2>
+        <table class="asset-table amortization-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>P&I</th>
+                    <th>Principal</th>
+                    <th>Interest</th>
+                    {% if summary.monthly_escrow > 0 %}
+                    <th>Escrow</th>
+                    <th>Total Payment</th>
+                    {% endif %}
+                    <th>Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in schedule %}
+                <tr>
+                    <td data-label="#">{{ row.number }}</td>
+                    <td data-label="Date">{{ row.date }}</td>
+                    <td data-label="P&I">${{ "%.2f"|format(row.payment) }}</td>
+                    <td data-label="Principal">${{ "%.2f"|format(row.principal) }}</td>
+                    <td data-label="Interest">${{ "%.2f"|format(row.interest) }}</td>
+                    {% if summary.monthly_escrow > 0 %}
+                    <td data-label="Escrow">${{ "%.2f"|format(row.escrow) }}</td>
+                    <td data-label="Total Payment">${{ "%.2f"|format(row.total_payment) }}</td>
+                    {% endif %}
+                    <td data-label="Balance">${{ "%.2f"|format(row.balance) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Escrow Account Simulation -->
+    {% if escrow_schedule %}
+    <div class="asset-section">
+        <h2>Escrow Account Simulation</h2>
+        <p class="section-description">Projected escrow account balance for the first {{ escrow_schedule|length }} payments{% if summary.escrow_balance > 0 %}, starting from current balance of ${{ "{:,.2f}".format(summary.escrow_balance) }}{% endif %}. Disbursements occur for property tax ({{ escrow_tax_months_label }}) and insurance ({{ escrow_insurance_month_label }}).</p>
+        <table class="asset-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Date</th>
+                    <th>Deposit</th>
+                    <th>Disbursement</th>
+                    <th>Balance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in escrow_schedule %}
+                <tr class="{{ 'shortage-row' if row.shortage else '' }}">
+                    <td data-label="#">{{ row.number }}</td>
+                    <td data-label="Date">{{ row.date }}</td>
+                    <td data-label="Deposit">${{ "%.2f"|format(row.deposit) }}</td>
+                    <td data-label="Disbursement">
+                        {% if row.disbursement > 0 %}
+                            ${{ "%.2f"|format(row.disbursement) }}
+                            <small style="color: #6c757d;">{{ row.disbursement_desc }}</small>
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td data-label="Balance" class="{{ 'negative-balance' if row.shortage else '' }}">${{ "%.2f"|format(row.balance) }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <p class="table-note">Negative balances indicate a potential escrow shortage. Your lender may require additional funds.</p>
+    </div>
+    {% endif %}
+{% endblock %}

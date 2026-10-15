@@ -1,0 +1,432 @@
+{% extends "base.html" %}
+
+{% macro money(v, dec=0) -%}
+{%- if v is none %}—{% elif v < 0 %}-${{ "{:,.{d}f}".format(-v, d=dec) }}{% else %}${{ "{:,.{d}f}".format(v, d=dec) }}{% endif -%}
+{%- endmacro %}
+
+{% macro num_input(name, label, step='1', help='', value=None, suffix='') -%}
+<label class="hm-field">
+    <span>{{ label }}</span>
+    <span class="hm-input-wrap">
+        <input type="number" name="{{ name }}" step="{{ step }}" inputmode="decimal"
+               value="{{ value if value is not none else (params[name] if params[name] is not none else '') }}">
+        {% if suffix %}<em>{{ suffix }}</em>{% endif %}
+    </span>
+    {% if help %}<small>{{ help }}</small>{% endif %}
+</label>
+{%- endmacro %}
+
+{% block content %}
+    <h1>Home Move Planner</h1>
+    <p class="hm-intro">Sell your current home, buy the next one, and see the full picture — net proceeds, cash to close, and the new monthly payment — using configurable local closing customs and live mortgage rates.</p>
+
+    <div class="hm-rates">
+        <strong>Rates{% if rates.live %} (live){% endif %}:</strong>
+        30-yr fixed <b>{{ "%.2f"|format(rates.rate30) }}%</b> ·
+        15-yr fixed <b>{{ "%.2f"|format(rates.rate15) }}%</b> ·
+        5/1 ARM <b>≈{{ "%.2f"|format(rates.arm) }}%</b>
+        <small>{{ rates.source }}{% if rates.as_of %}, week of {{ rates.as_of }}{% endif %}. ARM {{ rates.arm_note }}.
+            <a href="{{ url_for('home_move_page', **dict(request.args.to_dict(), refresh_rates=1)) }}">refresh</a></small>
+    </div>
+
+    {% if scenarios %}
+    <div class="hm-scenarios">
+        <span class="hm-scenarios-label">Saved scenarios:</span>
+        {% for s in scenarios %}
+        <span class="hm-scenario-chip {{ 'active' if s.id == active_scenario else '' }}">
+            <a href="{{ url_for('home_move_page', scenario=s.id) }}" title="{{ s.summary }}">{{ s.name }}</a>
+            <form method="POST" action="{{ url_for('home_move_delete', scenario_id=s.id) }}" onsubmit="return confirm('Delete scenario?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" title="Delete">&times;</button>
+            </form>
+        </span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="GET" action="{{ url_for('home_move_page') }}" id="hm-form" class="hm-form">
+        <div class="hm-columns">
+            <!-- ================= SELL ================= -->
+            <section class="hm-card hm-sell">
+                <h2>1. Sell current home</h2>
+                {% if homes %}
+                <label class="hm-field">
+                    <span>Prefill from</span>
+                    <select id="hm-home-select">
+                        <option value="">— pick a property —</option>
+                        {% for h in homes %}
+                        <option value="{{ h.id }}" data-value="{{ h.value }}" data-payoff="{{ h.payoff }}" data-monthly="{{ h.monthly }}" data-tax="{{ h.tax_annual }}">{{ h.name }} ({{ money(h.value) }})</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {% endif %}
+                {{ num_input('sale_price', 'Sale price', help='What you expect to sell for') }}
+                {{ num_input('mortgage_payoff', 'Mortgage payoff balance', help='Current principal owed (prefilled from your asset\'s amortized balance)') }}
+                {{ num_input('current_monthly_housing', 'Current monthly payment (P&I + escrow)', help='Used to compare against the new payment') }}
+                {{ num_input('current_tax_annual', 'Most recent annual property tax bill', help='Drives the property tax proration credit (where taxes are billed in arrears)') }}
+                <label class="hm-field">
+                    <span>Target closing date</span>
+                    <input type="date" name="closing_date" value="{{ params.closing_date or result.closing_date if result else params.closing_date or '' }}">
+                    <small>Assumes sale and purchase close the same day</small>
+                </label>
+
+                <details class="hm-advanced">
+                    <summary>Seller cost assumptions</summary>
+                    {{ num_input('commission_pct', 'Total agent commission', step='0.1', suffix='%', help='Listing + buyer agent. Negotiable since the 2024 NAR settlement.') }}
+                    {{ num_input('tax_proration_pct', 'Tax proration', step='1', suffix='%', help='Share of the last annual bill credited to the buyer, prorated to closing. Use 0 where taxes are paid in advance.') }}
+                    {{ num_input('tax_proration_credit', 'Override proration credit', help='Leave blank to compute') }}
+                    {{ num_input('seller_title_insurance', 'Owner\'s title policy', help='Seller-paid in many states. Blank = estimate from price') }}
+                    {{ num_input('seller_survey', 'Survey') }}
+                    {{ num_input('seller_misc', 'Misc seller fees (certificates, lien release, wire fees)') }}
+                    {{ num_input('seller_transfer_tax_per_1000', 'Seller transfer taxes', step='0.05', suffix='per $1,000', help='State + county + city transfer/stamp taxes the seller pays. Check your local rates.') }}
+                </details>
+            </section>
+
+            <!-- ================= BUY ================= -->
+            <section class="hm-card hm-buy">
+                <h2>2. Buy new home</h2>
+                <div class="hm-field">
+                    <span>I know the&hellip;</span>
+                    <div class="hm-radio-row">
+                        <label><input type="radio" name="solve_for" value="price" {{ 'checked' if params.solve_for != 'payment' }}> Purchase price</label>
+                        <label><input type="radio" name="solve_for" value="payment" {{ 'checked' if params.solve_for == 'payment' }}> Monthly payment I want &rarr; solve for price</label>
+                    </div>
+                </div>
+                {{ num_input('purchase_price', 'Purchase price', help=('Solved from your target payment' if solved_price else '')) }}
+                {{ num_input('target_payment', 'Target total monthly payment', help='PITI + HOA at the note rate (year 3+ if using a buydown). Uses the loan type, rate, down-payment mode and sale figures on this page - change the rate to see what you could afford at a different rate.') }}
+
+                <div class="hm-field">
+                    <span>Down payment</span>
+                    <div class="hm-radio-row">
+                        <label><input type="radio" name="down_mode" value="pct" {{ 'checked' if params.down_mode == 'pct' }}> Percent</label>
+                        <label><input type="radio" name="down_mode" value="amount" {{ 'checked' if params.down_mode == 'amount' }}> Amount</label>
+                        <label><input type="radio" name="down_mode" value="proceeds" {{ 'checked' if params.down_mode == 'proceeds' }}> All net proceeds</label>
+                    </div>
+                    <div class="hm-inline-pair">
+                        <span class="hm-input-wrap"><input type="number" name="down_payment_pct" step="0.5" inputmode="decimal" value="{{ params.down_payment_pct }}"><em>%</em></span>
+                        <span class="hm-input-wrap"><em>$</em><input type="number" name="down_payment_amount" step="1000" inputmode="decimal" value="{{ params.down_payment_amount or '' }}" placeholder="amount"></span>
+                    </div>
+                </div>
+                {{ num_input('extra_cash', 'Extra cash from savings', help='Cash you\'d add on top of sale proceeds') }}
+                {{ num_input('seller_credit', 'Seller credit / concessions', help='Closing-cost credit negotiated from the seller') }}
+
+                <label class="hm-field">
+                    <span>Loan</span>
+                    <select name="loan_type" id="hm-loan-type">
+                        {% for key, lt in loan_types.items() %}
+                        <option value="{{ key }}" {{ 'selected' if params.loan_type == key }}>{{ lt.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                {{ num_input('rate', 'Interest rate', step='0.01', suffix='%', help='Blank = use the live rate for the selected loan type') }}
+                {{ num_input('points_pct', 'Discount points', step='0.125', suffix='% of loan') }}
+
+                <div class="hm-field hm-buydown">
+                    <span>Temporary rate buydown</span>
+                    <div class="hm-inline-pair">
+                        {{ num_input('buydown_year1', 'Year 1 reduction', step='0.25', suffix='pts') }}
+                        {{ num_input('buydown_year2', 'Year 2 reduction', step='0.25', suffix='pts') }}
+                    </div>
+                    <div class="hm-radio-row">
+                        <span style="font-weight:600;">Paid by:</span>
+                        <label><input type="radio" name="buydown_payer" value="buyer" {{ 'checked' if params.buydown_payer != 'seller' }}> Me (added to closing costs)</label>
+                        <label><input type="radio" name="buydown_payer" value="seller" {{ 'checked' if params.buydown_payer == 'seller' }}> Seller (concession)</label>
+                    </div>
+                    <small>e.g. 2 / 1 for a 2-1 buydown. The escrow funded at closing covers the payment shortfall; the loan still amortizes at the note rate.</small>
+                </div>
+
+                <div class="hm-arm-fields" id="hm-arm-fields">
+                    <p class="hm-note">ARM caps (first / periodic / lifetime) and the rate you expect after the fixed period.</p>
+                    <div class="hm-inline-trio">
+                        {{ num_input('arm_first_cap', 'First adj. cap', step='0.25', suffix='pts') }}
+                        {{ num_input('arm_periodic_cap', 'Periodic cap', step='0.25', suffix='pts') }}
+                        {{ num_input('arm_lifetime_cap', 'Lifetime cap', step='0.25', suffix='pts') }}
+                    </div>
+                    {{ num_input('arm_expected_rate', 'Expected rate after fixed period', step='0.01', suffix='%', help='Blank = intro rate + 1.0') }}
+                </div>
+
+                <div class="hm-field">
+                    <span>Property tax</span>
+                    <div class="hm-radio-row">
+                        <label><input type="radio" name="tax_mode" value="rate" {{ 'checked' if params.tax_mode == 'rate' }}> % of price</label>
+                        <label><input type="radio" name="tax_mode" value="amount" {{ 'checked' if params.tax_mode == 'amount' }}> Annual amount</label>
+                    </div>
+                    <div class="hm-inline-pair">
+                        <span class="hm-input-wrap"><input type="number" name="tax_rate_pct" step="0.05" inputmode="decimal" value="{{ params.tax_rate_pct }}"><em>%/yr</em></span>
+                        <span class="hm-input-wrap"><em>$</em><input type="number" name="tax_annual" step="100" inputmode="decimal" value="{{ params.tax_annual or '' }}" placeholder="annual"></span>
+                    </div>
+                    <small>Effective rate as a % of market value. Many counties reassess after a sale, so the listing's current bill can understate what you'll pay.</small>
+                </div>
+
+                <div class="hm-field">
+                    <span>Homeowner's insurance</span>
+                    <div class="hm-radio-row">
+                        <label><input type="radio" name="insurance_mode" value="rate" {{ 'checked' if params.insurance_mode == 'rate' }}> % of price</label>
+                        <label><input type="radio" name="insurance_mode" value="amount" {{ 'checked' if params.insurance_mode == 'amount' }}> Annual amount</label>
+                    </div>
+                    <div class="hm-inline-pair">
+                        <span class="hm-input-wrap"><input type="number" name="insurance_rate_pct" step="0.05" inputmode="decimal" value="{{ params.insurance_rate_pct }}"><em>%/yr</em></span>
+                        <span class="hm-input-wrap"><em>$</em><input type="number" name="insurance_annual" step="100" inputmode="decimal" value="{{ params.insurance_annual or '' }}" placeholder="annual"></span>
+                    </div>
+                </div>
+                {{ num_input('hoa_monthly', 'HOA / assessments (monthly)') }}
+                {{ num_input('pmi_rate_pct', 'PMI rate (if LTV > 80%)', step='0.05', suffix='% of loan/yr') }}
+
+                <details class="hm-advanced">
+                    <summary>Buyer closing cost assumptions</summary>
+                    {{ num_input('lender_origination', 'Lender origination / underwriting') }}
+                    {{ num_input('appraisal', 'Appraisal') }}
+                    {{ num_input('lender_misc', 'Credit report, flood cert, tax service') }}
+                    {{ num_input('lender_title_policy', 'Lender\'s title policy') }}
+                    {{ num_input('closing_escrow_fee', 'Title settlement / closing fee') }}
+                    {{ num_input('recording_fees', 'Recording fees') }}
+                    {{ num_input('inspection', 'Inspection') }}
+                    {{ num_input('buyer_misc', 'Misc') }}
+                    {{ num_input('escrow_reserve_months', 'Initial escrow reserve', step='1', suffix='months') }}
+                    {{ num_input('prepaid_insurance_months', 'Prepaid insurance', step='1', suffix='months') }}
+                    {{ num_input('buyer_transfer_tax_per_1000', 'Buyer transfer taxes', step='0.05', suffix='per $1,000', help='Transfer/stamp taxes charged to the buyer, if any, in your area') }}
+                    <p class="hm-note">Prepaid interest to month end is computed automatically.</p>
+                </details>
+            </section>
+        </div>
+
+        <div class="hm-actions">
+            <button type="submit" class="action-btn verify-btn hm-btn">Calculate</button>
+            <a href="{{ url_for('home_move_page') }}" class="action-btn cancel-btn hm-btn">Reset</a>
+        </div>
+    </form>
+
+    {% if result %}
+    {% set s = result.sale %}{% set b = result.purchase %}{% set m = result.monthly %}{% set l = result.loan %}
+    <div class="hm-results" id="results">
+        {% if params.solve_for == 'payment' and params.target_payment %}
+        <div class="hm-alert {{ 'ok' if solved_price else 'warn' }}">
+            {% if solved_price %}
+            <strong>Reverse calc:</strong> to keep the total payment at {{ money(params.target_payment) }}/mo at {{ "%.2f"|format(b.rate) }}% ({{ result.loan_label }}), the most you can pay is about <strong>{{ money(solved_price) }}</strong>
+            &mdash; putting {{ money(b.down) }} down ({{ "%.1f"|format(b.down_pct) }}%), loan {{ money(b.loan) }}. Everything below is computed at that price.
+            {% else %}
+            <strong>Reverse calc:</strong> no price reaches a {{ money(params.target_payment) }}/mo payment with these inputs. Showing the entered price instead.
+            {% endif %}
+        </div>
+        {% endif %}
+        <h2>Result — {{ result.loan_label }} at {{ "%.2f"|format(b.rate) }}%{% if b.rate_is_live %} (live){% endif %}, closing {{ result.closing_date_display }}</h2>
+
+        <div class="hm-kpis">
+            <div class="hm-kpi {{ 'neg' if s.net_proceeds < 0 else 'pos' }}">
+                <span class="hm-kpi-label">Net proceeds from sale</span>
+                <span class="hm-kpi-value">{{ money(s.net_proceeds) }}</span>
+                <small>{{ money(s.price) }} − payoff {{ money(s.payoff) }} − costs {{ money(s.costs_total) }}</small>
+            </div>
+            <div class="hm-kpi">
+                <span class="hm-kpi-label">Cash to close on purchase</span>
+                <span class="hm-kpi-value">{{ money(b.cash_to_close) }}</span>
+                <small>Down {{ money(b.down) }} + costs {{ money(b.closing_costs_total) }} + prepaids {{ money(b.prepaids_total) }}{% if b.seller_credit %} − credit {{ money(b.seller_credit) }}{% endif %}</small>
+            </div>
+            <div class="hm-kpi {{ 'neg' if b.cash_after < 0 else 'pos' }}">
+                <span class="hm-kpi-label">{{ 'Cash shortfall' if b.cash_after < 0 else 'Cash left over' }}</span>
+                <span class="hm-kpi-value">{{ money(b.cash_after|abs) }}</span>
+                <small>Proceeds {{ money(s.net_proceeds) }}{% if b.extra_cash %} + savings {{ money(b.extra_cash) }}{% endif %} vs. cash to close</small>
+            </div>
+            <div class="hm-kpi hm-kpi-primary">
+                <span class="hm-kpi-label">New monthly payment (PITI{% if m.hoa %} + HOA{% endif %})</span>
+                <span class="hm-kpi-value">{{ money(m.total) }}</span>
+                {% if b.buydown.years %}
+                <small>Yr 1 {{ money(m.total - b.buydown.years[0].monthly_saving) }} with buydown</small>
+                {% endif %}
+                {% if m.delta is not none %}
+                <small class="{{ 'up' if m.delta > 0 else 'down' }}">{{ '+' if m.delta > 0 }}{{ money(m.delta) }}/mo vs. current {{ money(m.current) }} ({{ '+' if m.delta > 0 }}{{ money(m.annual_delta) }}/yr)</small>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if b.cash_after < 0 %}
+        <div class="hm-alert warn">Short {{ money(-b.cash_after) }} at closing. Lower the down payment, add cash from savings, negotiate a seller credit, or reduce the purchase price.</div>
+        {% endif %}
+        {% if b.pmi_applies %}
+        <div class="hm-alert info">LTV is {{ "%.1f"|format(b.ltv) }}% — PMI of {{ money(m.pmi) }}/mo applies until you reach 80% (put {{ money(b.price * 0.2 - b.down) }} more down to avoid it).</div>
+        {% endif %}
+        {% if m.housing_ratio %}
+        <div class="hm-alert {{ 'warn' if m.housing_ratio > 36 else ('info' if m.housing_ratio > 28 else 'ok') }}">Housing ratio: {{ "%.1f"|format(m.housing_ratio) }}% of your budgeted monthly income ({{ money(m.income) }}). Lenders generally like ≤ 28%; 36%+ gets tight.</div>
+        {% endif %}
+
+        <div class="hm-columns">
+            <!-- Sale breakdown -->
+            <section class="hm-card">
+                <h3>Sale of current home</h3>
+                <table class="hm-table">
+                    <tr><td>Sale price</td><td>{{ money(s.price) }}</td></tr>
+                    <tr><td>Mortgage payoff</td><td>−{{ money(s.payoff) }}</td></tr>
+                    <tr class="hm-subtotal"><td>Gross equity</td><td>{{ money(s.equity) }}</td></tr>
+                    {% for name, amt, note in s.costs %}
+                    <tr><td>{{ name }}{% if note %}<small>{{ note }}</small>{% endif %}</td><td>−{{ money(amt) }}</td></tr>
+                    {% endfor %}
+                    <tr class="hm-subtotal"><td>Total selling costs ({{ "%.1f"|format(s.costs_pct) }}%)</td><td>−{{ money(s.costs_total) }}</td></tr>
+                    <tr class="hm-total"><td>Net proceeds</td><td>{{ money(s.net_proceeds) }}</td></tr>
+                </table>
+            </section>
+
+            <!-- Purchase breakdown -->
+            <section class="hm-card">
+                <h3>Purchase of new home</h3>
+                <table class="hm-table">
+                    <tr><td>Purchase price</td><td>{{ money(b.price) }}</td></tr>
+                    <tr><td>Down payment ({{ "%.1f"|format(b.down_pct) }}%)</td><td>{{ money(b.down) }}</td></tr>
+                    <tr class="hm-subtotal"><td>Loan amount (LTV {{ "%.1f"|format(b.ltv) }}%)</td><td>{{ money(b.loan) }}</td></tr>
+                    {% for name, amt, note in b.closing_costs %}{% if amt %}
+                    <tr><td>{{ name }}</td><td>{{ money(amt) }}</td></tr>
+                    {% endif %}{% endfor %}
+                    <tr class="hm-subtotal"><td>Closing costs</td><td>{{ money(b.closing_costs_total) }}</td></tr>
+                    {% for name, amt, note in b.prepaids %}
+                    <tr><td>{{ name }}</td><td>{{ money(amt) }}</td></tr>
+                    {% endfor %}
+                    <tr class="hm-subtotal"><td>Prepaids &amp; escrow</td><td>{{ money(b.prepaids_total) }}</td></tr>
+                    {% if b.seller_credit %}<tr><td>Seller credit</td><td>−{{ money(b.seller_credit) }}</td></tr>{% endif %}
+                    <tr class="hm-total"><td>Cash to close</td><td>{{ money(b.cash_to_close) }}</td></tr>
+                    <tr><td>Cash available (proceeds{% if b.extra_cash %} + savings{% endif %})</td><td>{{ money(b.cash_available) }}</td></tr>
+                    <tr class="hm-total {{ 'neg' if b.cash_after < 0 }}"><td>{{ 'Shortfall' if b.cash_after < 0 else 'Left over' }}</td><td>{{ money(b.cash_after|abs) }}</td></tr>
+                </table>
+            </section>
+        </div>
+
+        <div class="hm-columns">
+            <!-- Monthly -->
+            <section class="hm-card">
+                <h3>New monthly payment</h3>
+                <table class="hm-table">
+                    <tr><td>Principal &amp; interest</td><td>{{ money(m.pi) }}</td></tr>
+                    <tr><td>Property tax<small>{{ money(m.tax_annual) }}/yr</small></td><td>{{ money(m.tax) }}</td></tr>
+                    <tr><td>Homeowner's insurance<small>{{ money(m.insurance_annual) }}/yr</small></td><td>{{ money(m.insurance) }}</td></tr>
+                    {% if m.pmi %}<tr><td>PMI</td><td>{{ money(m.pmi) }}</td></tr>{% endif %}
+                    {% if m.hoa %}<tr><td>HOA / assessments</td><td>{{ money(m.hoa) }}</td></tr>{% endif %}
+                    <tr class="hm-total"><td>Total monthly</td><td>{{ money(m.total) }}</td></tr>
+                    {% if b.buydown.years %}
+                    {% for y in b.buydown.years %}
+                    <tr><td>Year {{ y.year }} with buydown<small>{{ "%.2f"|format(y.rate) }}% · saves {{ money(y.monthly_saving) }}/mo</small></td><td>{{ money(m.total - y.monthly_saving) }}</td></tr>
+                    {% endfor %}
+                    <tr><td>Year {{ b.buydown.years|length + 1 }}+ (note rate)</td><td>{{ money(m.total) }}</td></tr>
+                    <tr class="hm-subtotal"><td>Buydown cost ({{ b.buydown.label }}), paid by {{ 'seller' if b.buydown_payer == 'seller' else 'you' }}</td><td>{{ money(b.buydown.cost) }}</td></tr>
+                    {% endif %}
+                    {% if m.current %}
+                    <tr><td>Current home payment</td><td>{{ money(m.current) }}</td></tr>
+                    <tr class="hm-subtotal {{ 'neg' if m.delta > 0 }}"><td>Change</td><td>{{ '+' if m.delta > 0 }}{{ money(m.delta) }}/mo</td></tr>
+                    {% endif %}
+                </table>
+                <div class="hm-bar">
+                    {% set parts = [('P&I', m.pi, '#007bff'), ('Tax', m.tax, '#fd7e14'), ('Ins', m.insurance, '#20c997'), ('PMI', m.pmi, '#dc3545'), ('HOA', m.hoa, '#6f42c1')] %}
+                    {% for label, v, color in parts %}{% if v and m.total %}
+                    <span style="width: {{ v / m.total * 100 }}%; background: {{ color }};" title="{{ label }} {{ money(v) }}">{{ label }}</span>
+                    {% endif %}{% endfor %}
+                </div>
+            </section>
+
+            <!-- Loan life -->
+            <section class="hm-card">
+                <h3>Loan over its life</h3>
+                <table class="hm-table">
+                    <tr><td>Term</td><td>{{ b.term_years }} years (paid off {{ l.payoff_year }})</td></tr>
+                    <tr><td>Total interest</td><td>{{ money(l.total_interest) }}</td></tr>
+                    <tr><td>Total principal + interest</td><td>{{ money(l.total_paid) }}</td></tr>
+                    {% if l.balance_year5 is not none %}<tr><td>Balance after 5 years</td><td>{{ money(l.balance_year5) }}</td></tr>{% endif %}
+                </table>
+                {% if l.arm %}
+                <h4>ARM adjustment scenarios (after year {{ l.arm.fixed_years }})</h4>
+                <table class="hm-table">
+                    <tr><td>Intro rate {{ "%.2f"|format(l.arm.intro_rate) }}%</td><td>{{ money(l.arm.intro_payment) }}/mo</td></tr>
+                    <tr><td>Expected {{ "%.2f"|format(l.arm.expected_rate) }}%</td><td>{{ money(l.arm.expected_payment) }}/mo</td></tr>
+                    <tr><td>Worst first adjustment {{ "%.2f"|format(l.arm.worst_first_rate) }}% (+{{ l.arm.first_cap }} cap)</td><td>{{ money(l.arm.worst_first_payment) }}/mo</td></tr>
+                    <tr class="neg"><td>Lifetime max {{ "%.2f"|format(l.arm.worst_max_rate) }}% (+{{ l.arm.lifetime_cap }} cap)</td><td>{{ money(l.arm.worst_max_payment) }}/mo</td></tr>
+                </table>
+                <p class="hm-note">Remaining balance at first adjustment ≈ {{ money(l.arm.balance_at_adjust) }}. Rates step up at most {{ l.arm.periodic_cap }} pts per year after the first adjustment. P&amp;I only — taxes and insurance add {{ money(m.total - m.pi) }}.</p>
+                {% endif %}
+            </section>
+        </div>
+
+        <section class="hm-card">
+            <h3>Yearly amortization</h3>
+            <div class="table-scroll">
+            <table class="hm-amort">
+                <thead><tr><th>Year</th><th>Rate</th><th>Principal</th><th>Interest</th><th>Balance</th></tr></thead>
+                <tbody>
+                {% for y in l.years %}
+                <tr class="{{ 'hm-amort-hide' if loop.index > 10 }}"><td>{{ y.year }}</td><td>{{ "%.2f"|format(y.rate) }}%</td><td>{{ money(y.principal) }}</td><td>{{ money(y.interest) }}</td><td>{{ money(y.balance) }}</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% if l.years|length > 10 %}
+            <button type="button" class="action-btn edit-btn" id="hm-amort-toggle">Show all {{ l.years|length }} years</button>
+            {% endif %}
+        </section>
+
+        <form method="POST" action="{{ url_for('home_move_save') }}" class="hm-save" id="hm-save-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="scenario_name" placeholder="Name this scenario (e.g. 'Sell 400k, buy 550k')">
+            <button type="submit" class="action-btn verify-btn hm-btn">Save scenario</button>
+        </form>
+
+        <p class="hm-note">Estimates only. Attorney/escrow-agent fees, where customary, are not included. Closing customs vary by state and county (who pays title insurance and transfer taxes, and whether property taxes are billed in arrears); set the inputs above to match your area. Confirm figures with your lender's Loan Estimate.</p>
+    </div>
+    {% endif %}
+
+    <script>
+    (function () {
+        const form = document.getElementById('hm-form');
+        // Prefill sale side from a chosen property
+        const sel = document.getElementById('hm-home-select');
+        sel?.addEventListener('change', () => {
+            const o = sel.selectedOptions[0];
+            if (!o || !o.value) return;
+            form.sale_price.value = o.dataset.value;
+            form.mortgage_payoff.value = o.dataset.payoff;
+            form.current_monthly_housing.value = o.dataset.monthly;
+            form.current_tax_annual.value = o.dataset.tax;
+        });
+        // Reverse mode: dim the input that isn't driving the calc
+        function syncSolve() {
+            const rev = form.querySelector('input[name="solve_for"]:checked')?.value === 'payment';
+            form.elements.purchase_price.closest('.hm-input-wrap').classList.toggle('dim', rev);
+            form.elements.target_payment.closest('.hm-input-wrap').classList.toggle('dim', !rev);
+        }
+        form.querySelectorAll('input[name="solve_for"]').forEach(r => r.addEventListener('change', syncSolve)); syncSolve();
+        // Show ARM fields only for ARM loans
+        const lt = document.getElementById('hm-loan-type');
+        const armFields = document.getElementById('hm-arm-fields');
+        function syncArm() { armFields.style.display = lt.value.startsWith('arm') ? '' : 'none'; }
+        lt.addEventListener('change', syncArm); syncArm();
+        // Radio-driven inputs: dim the one not in use
+        function syncModes() {
+            const pairs = [['down_mode', {pct: 'down_payment_pct', amount: 'down_payment_amount'}],
+                           ['tax_mode', {rate: 'tax_rate_pct', amount: 'tax_annual'}],
+                           ['insurance_mode', {rate: 'insurance_rate_pct', amount: 'insurance_annual'}]];
+            pairs.forEach(([radio, map]) => {
+                const v = form.querySelector(`input[name="${radio}"]:checked`)?.value;
+                Object.entries(map).forEach(([mode, name]) => {
+                    const el = form.elements[name];
+                    el.closest('.hm-input-wrap').classList.toggle('dim', v !== mode && v !== 'proceeds');
+                });
+            });
+        }
+        form.querySelectorAll('input[type="radio"]').forEach(r => r.addEventListener('change', syncModes)); syncModes();
+        // Drop empty fields from the query string so the URL stays short
+        form.addEventListener('submit', () => {
+            form.querySelectorAll('input, select').forEach(el => { if (!el.name || el.type === 'radio') return; if (el.value === '') el.disabled = true; });
+        });
+        // Save scenario: copy the current form values into the POST
+        const save = document.getElementById('hm-save-form');
+        save?.addEventListener('submit', () => {
+            new FormData(form).forEach((v, k) => {
+                if (v === '') return;
+                const h = document.createElement('input'); h.type = 'hidden'; h.name = k; h.value = v; save.appendChild(h);
+            });
+        });
+        // Amortization show-all
+        document.getElementById('hm-amort-toggle')?.addEventListener('click', e => {
+            document.querySelectorAll('.hm-amort-hide').forEach(r => r.classList.remove('hm-amort-hide'));
+            e.target.remove();
+        });
+        {% if result and request.args %}
+        if (window.innerWidth < 769) document.getElementById('results')?.scrollIntoView({behavior: 'smooth'});
+        {% endif %}
+    })();
+    </script>
+{% endblock %}

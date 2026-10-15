@@ -1,0 +1,20 @@
+# Non-secret settings. See .env.example in the repo root for every variable.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: accounting-config
+  namespace: accounting
+data:
+  MONGO_URI: "mongodb://mongodb:27017/"
+  MONGO_DB_NAME: "accounting_cloud"
+  # Set to the sub-path if the Ingress serves the app under one (e.g. /accounting),
+  # and change the probe paths in deployment.yaml to match.
+  APPLICATION_ROOT: "/"
+  CC_STATEMENT_DIR: "/app/data/cc_statements"
+  # Optional LLM endpoints (Ollama-compatible). Leave as-is to disable gracefully.
+  OLLAMA_URL: "http://ollama.ollama.svc.cluster.local:11434"
+  OLLAMA_MODEL: "granite4.2:3b"
+  CC_LLM_ENABLED: "true"
+  ADVISOR_ENABLED: "false"
+  AGENT_OLLAMA_HOST: "http://ollama.ollama.svc.cluster.local:11434"
+  AGENT_OLLAMA_MODEL: "gemma4:e4b"

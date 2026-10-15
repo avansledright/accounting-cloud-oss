@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Edit Goal</h1>
+
+    <div class="data-entry">
+        <form method="POST" action="{{ url_for('edit_goal', goal_id=goal._id) }}" class="goal-form" id="goal-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Goal Name:</label>
+                    <input type="text" id="name" name="name" value="{{ goal.name }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="goal_type">Goal Type:</label>
+                    <select id="goal_type" name="goal_type" onchange="updateGoalFields()">
+                        {% for value, label in goal_types %}
+                        <option value="{{ value }}" {{ 'selected' if goal.goal_type == value else '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category:</label>
+                    <select id="category" name="category">
+                        {% for value, label in goal_categories %}
+                        <option value="{{ value }}" {{ 'selected' if goal.category == value else '' }}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group goal-field" data-for="manual account retirement networth">
+                    <label for="target_amount">Target Amount:</label>
+                    <input type="number" id="target_amount" name="target_amount" value="{{ goal.target_amount or '' }}" step="0.01">
+                </div>
+                <div class="form-group goal-field" data-for="manual">
+                    <label for="current_amount">Current Amount:</label>
+                    <input type="number" id="current_amount" name="current_amount" value="{{ goal.current_amount or 0 }}" step="0.01">
+                </div>
+                <div class="form-group goal-field" data-for="emergency">
+                    <label for="months_target">Months of Expenses:</label>
+                    <input type="number" id="months_target" name="months_target" value="{{ goal.months_target or '' }}" step="0.5">
+                </div>
+                <div class="form-group goal-field" data-for="debt_free debt_payoff">
+                    <label for="baseline_amount">Starting Debt <small>(blank = use current)</small>:</label>
+                    <input type="number" id="baseline_amount" name="baseline_amount" value="{{ goal.baseline_amount if goal.baseline_amount is not none else '' }}" placeholder="auto" step="0.01">
+                </div>
+                <div class="form-group goal-field" data-for="manual account retirement networth emergency">
+                    <label for="target_date">Target Date:</label>
+                    <input type="date" id="target_date" name="target_date" value="{{ goal.target_date or '' }}">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group goal-field" data-for="account emergency retirement">
+                    <label for="linked_account_ids">Linked Accounts <small>(ctrl/cmd-click for multiple)</small>:</label>
+                    <select id="linked_account_ids" name="linked_account_ids" multiple size="5">
+                        {% for a in accounts %}
+                        <option value="{{ a._id }}" {{ 'selected' if a._id in goal.linked_account_ids else '' }}>{{ a.name }}{% if a.institution %} · {{ a.institution }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="field-hint" data-for="emergency">Leave empty to track all checking + savings balances.</small>
+                </div>
+                <div class="form-group goal-field" data-for="debt_payoff">
+                    <label for="linked_debt_id">Debt to Pay Off:</label>
+                    <select id="linked_debt_id" name="linked_debt_id">
+                        <option value="">— select a debt —</option>
+                        {% for d in debts %}
+                        <option value="{{ d._id }}" {{ 'selected' if goal.linked_debt_id == d._id else '' }}>{{ d.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes:</label>
+                    <input type="text" id="notes" name="notes" value="{{ goal.notes or '' }}">
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit">Save Changes</button>
+                <a href="{{ url_for('goals_page') }}" class="cancel-btn">Cancel</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function updateGoalFields() {
+            var type = document.getElementById('goal_type').value;
+            document.querySelectorAll('#goal-form .goal-field').forEach(function (el) {
+                var types = (el.getAttribute('data-for') || '').split(/\s+/);
+                el.style.display = types.indexOf(type) !== -1 ? '' : 'none';
+            });
+            document.querySelectorAll('#goal-form .field-hint').forEach(function (el) {
+                var types = (el.getAttribute('data-for') || '').split(/\s+/);
+                el.style.display = types.indexOf(type) !== -1 ? '' : 'none';
+            });
+        }
+        updateGoalFields();
+    </script>
+{% endblock %}

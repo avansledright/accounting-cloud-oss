@@ -1,0 +1,540 @@
+{% extends "base.html" %}
+
+{% macro money(v, dec=0) -%}
+{%- if v is none %}—{% elif v < 0 %}-${{ "{:,.{d}f}".format(-v, d=dec) }}{% else %}${{ "{:,.{d}f}".format(v, d=dec) }}{% endif -%}
+{%- endmacro %}
+
+{% block content %}
+<h1>Tax Year &amp; Benefits</h1>
+<p class="bn-intro">
+    Contribution room on tax-advantaged accounts and statement credits on your cards both
+    reset on a calendar the IRS and your issuers set — not one you control. This page tracks
+    what is left before each deadline.
+</p>
+
+<form method="get" class="bn-yearbar">
+    <label>Year
+        <select name="year" onchange="this.form.submit()">
+            {% for y in years %}
+            <option value="{{ y }}" {% if y == year %}selected{% endif %}>{{ y }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <noscript><button type="submit">Go</button></noscript>
+</form>
+
+{# ---------- Alerts ----------
+   Only the items that need action stay expanded; the rest collapse so a card
+   with a dozen credits can't push the contribution tables below the fold. #}
+{% if alerts %}
+{% set urgent = alerts | selectattr('severity', 'in', ['high', 'med']) | list %}
+{% set rest = alerts | rejectattr('severity', 'in', ['high', 'med']) | list %}
+<div class="bn-alerts">
+    {% for a in urgent %}
+    <div class="bn-alert bn-{{ a.severity }}">
+        <strong>{{ a.title }}</strong>
+        <span>{{ a.detail }}</span>
+    </div>
+    {% endfor %}
+    {% if rest %}
+    <details class="bn-details bn-more-alerts">
+        <summary>{{ rest|length }} more, not urgent</summary>
+        {% for a in rest %}
+        <div class="bn-alert bn-{{ a.severity }}">
+            <strong>{{ a.title }}</strong>
+            <span>{{ a.detail }}</span>
+        </div>
+        {% endfor %}
+    </details>
+    {% endif %}
+</div>
+{% else %}
+<div class="bn-alert bn-info"><strong>Nothing expiring.</strong>
+    <span>No contribution room or card credits need attention right now.</span></div>
+{% endif %}
+
+{# ---------- Contribution limits ---------- #}
+<h2 class="bn-h2">Contribution limits</h2>
+{% if not groups %}
+<div class="data-entry">
+    <p>No accounts are linked to a contribution limit yet. Add an HSA, 401(k), or IRA on the
+       <a href="{{ url_for('accounts_page') }}">Accounts</a> page — they pick up their limit
+       automatically — or link an existing account below.</p>
+</div>
+{% endif %}
+
+{% for g in groups %}
+<div class="data-entry bn-group">
+    <div class="bn-group-head">
+        <h2>{{ g.label }}</h2>
+        <div class="bn-group-meta">
+            {% if g.limit %}
+            <span class="bn-big">{{ money(g.contributed) }}</span>
+            <span class="bn-of">of {{ money(g.limit) }}</span>
+            {% elif g.uncapped %}
+            <span class="bn-big">{{ money(g.contributed) }}</span>
+            <span class="bn-of">contributed in {{ year }} · no IRS limit</span>
+            {% else %}
+            <span class="bn-of">No limit set for {{ year }} — enter one in Settings below.</span>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if g.uncapped %}
+    <p class="bn-hint">Counted toward retirement by choice, not by the IRS — there is no cap and
+       no deadline here, so nothing in this section can be forfeited.</p>
+    {% elif g.limit %}
+    <div class="progress-bar bn-bar">
+        <div class="progress-fill {% if g.over %}bn-fill-over{% elif g.remaining <= 0 %}bn-fill-done{% endif %}"
+             style="width: {{ '%.1f'|format(g.pct) }}%"></div>
+    </div>
+    <div class="bn-stats">
+        <div><span class="bn-stat-label">Remaining</span>
+             <b class="{% if g.over %}negative-balance{% endif %}">
+                {% if g.over %}{{ money(g.over) }} over{% else %}{{ money(g.remaining) }}{% endif %}</b></div>
+        <div><span class="bn-stat-label">Deadline</span>
+             <b>{{ g.deadline.strftime('%b %-d, %Y') }}</b></div>
+        <div><span class="bn-stat-label">Days left</span><b>{{ g.days_left }}</b></div>
+        {% if g.periods_left %}
+        <div><span class="bn-stat-label">Paychecks left</span><b>{{ g.periods_left }}</b></div>
+        <div><span class="bn-stat-label">Needed / paycheck</span>
+             <b>{{ money(g.per_period_needed) }}</b></div>
+        {% endif %}
+        {% if g.scheduled_remaining is not none %}
+        <div><span class="bn-stat-label">Payroll will add</span>
+             <b class="{% if g.scheduled_remaining < g.remaining %}negative-balance{% endif %}">
+                {{ money(g.scheduled_remaining) }}</b></div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% for e in g.entries %}
+    <div class="bn-account">
+        <div class="bn-account-head">
+            <div>
+                <strong>{{ e.account.name }}</strong>
+                {% if e.account.institution %}<small>{{ e.account.institution }}</small>{% endif %}
+            </div>
+            <div class="bn-account-amt">
+                {{ money(e.contributed, 2) }}
+                <small>
+                    {% if e.source == 'manual' %}
+                        from paystub{% if e.manual_as_of %}, as of {{ e.manual_as_of.strftime('%b %-d') }}{% endif %}
+                    {% elif e.source == 'manual+auto' %}
+                        {{ money(e.manual_base, 2) }} from paystub + {{ money(e.auto_amount, 2) }} since
+                    {% else %}
+                        from tracked transfers
+                    {% endif %}
+                </small>
+            </div>
+        </div>
+
+        <form method="post" action="{{ url_for('benefits_contribution_save') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="account_id" value="{{ e.account_id }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <label>YTD from paystub
+                <input type="number" step="0.01" name="ytd_amount" placeholder="0.00"
+                       value="{{ e.override.ytd_amount if e.override else '' }}"></label>
+            <label>As of
+                <input type="date" name="as_of"
+                       value="{{ e.manual_as_of.strftime('%Y-%m-%d') if e.manual_as_of else '' }}"></label>
+            <button type="submit">Save</button>
+            {% if e.override %}
+            <button type="submit" name="clear" value="1" class="bn-btn-muted">Clear</button>
+            {% endif %}
+        </form>
+        <small class="bn-hint">Payroll deductions never touch the ledger, so the paystub figure wins.
+            Transfers dated after “as of” are added on top.</small>
+
+        {% if e.recent %}
+        <details class="bn-details">
+            <summary>{{ e.recent|length }} tracked contribution{{ '' if e.recent|length == 1 else 's' }}</summary>
+            <ul class="bn-list">
+                {% for r in e.recent %}
+                <li><span>{{ r.date.strftime('%b %-d') }}</span> {{ r.description }}
+                    <b>{{ money(r.amount, 2) }}</b></li>
+                {% endfor %}
+            </ul>
+        </details>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endfor %}
+
+{# ---------- Employer match ---------- #}
+{% if match %}
+<div class="data-entry bn-match {% if not match.captured %}bn-match-warn{% endif %}">
+    <h2>Employer match</h2>
+    {% if match.captured %}
+    <p>Full match captured — {{ money(match.contributed) }} contributed against the
+       {{ '%g'|format(match.match_limit_pct) }}% of salary needed.</p>
+    {% else %}
+    <p><strong>{{ money(match.match_at_risk) }} of match is still on the table.</strong>
+       You've contributed {{ money(match.contributed) }}; the full match needs
+       {{ money(match.needed_contribution) }} ({{ '%g'|format(match.match_limit_pct) }}% of a
+       {{ money(match.salary) }} salary), matched at
+       {{ '%g'|format(match.match_rate_pct) }}%.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ---------- Card perks ---------- #}
+<h2 class="bn-h2">Card credits &amp; annual fees</h2>
+{% if not card_perks %}
+<div class="data-entry">
+    <p>No cards yet. Add them on the <a href="{{ url_for('credit_cards_page') }}">Cards</a> page,
+       then load a perk template here.</p>
+</div>
+{% endif %}
+
+{% for c in card_perks %}
+<div class="data-entry bn-card">
+    <div class="bn-group-head">
+        <h2>{{ c.card.name }}</h2>
+        <div class="bn-group-meta">
+            {% if c.annual_fee %}
+            <span class="bn-big {% if c.net >= 0 %}bn-good{% else %}bn-bad{% endif %}">
+                {{ money(c.net) }}</span>
+            <span class="bn-of">net of {{ money(c.annual_fee) }} fee</span>
+            {% else %}
+            <span class="bn-of">No annual fee recorded</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="bn-stats">
+        <div><span class="bn-stat-label">Credits used</span><b>{{ money(c.captured) }}</b></div>
+        <div><span class="bn-stat-label">Available now</span>
+             <b class="{% if c.available_now %}bn-good{% endif %}">{{ money(c.available_now) }}</b></div>
+        <div><span class="bn-stat-label">Forfeited</span>
+             <b class="{% if c.forfeited %}negative-balance{% endif %}">{{ money(c.forfeited) }}</b></div>
+        <div><span class="bn-stat-label">Max value</span><b>{{ money(c.potential) }}</b></div>
+    </div>
+
+    {% if not c.perks %}
+    <div class="bn-empty-card">
+        {% if c.suggested_template %}
+        {% set tpl = perk_templates[c.suggested_template] %}
+        <p><strong>No credits loaded yet.</strong>
+           This card has a researched starter set:
+           <b>{{ tpl.label }}</b> — {{ money(tpl.annual_fee) }} annual fee and
+           {{ tpl.perks|length }} credits worth
+           {{ money(template_totals[c.suggested_template]) }} a year,
+           plus {{ tpl.benefits|length }} non-credit benefits. Checked {{ tpl.checked }}.</p>
+        <form method="post" action="{{ url_for('benefits_perk_template') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="card_id" value="{{ c.card_id }}">
+            <input type="hidden" name="template" value="{{ c.suggested_template }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <button type="submit">Load {{ tpl.label }} credits</button>
+        </form>
+        <small class="bn-hint">You can edit every credit afterwards, or pick a different
+            template under “Card settings &amp; add a credit” below.</small>
+        {% else %}
+        <p><strong>No credits loaded yet.</strong> Add them one at a time, or load a template,
+           under “Card settings &amp; add a credit” below.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if c.perks %}
+    <div class="bn-table-wrap">
+    <table class="bn-perks">
+        <thead>
+            <tr>
+                <th>Credit</th><th>Each</th><th>Cadence</th><th class="bn-col-periods">{{ year }}</th><th></th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for p in c.perks %}
+        <tr>
+            <td>
+                <strong>{{ p.name }}</strong>
+                {% if p.notes %}<small>{{ p.notes }}</small>{% endif %}
+                {% if p.ends_on %}<small class="bn-sunset">ends {{ p.ends_on.strftime('%b %-d, %Y') }}</small>{% endif %}
+            </td>
+            <td>{{ money(p.amount, 0 if p.amount == p.amount|round(0) else 2) }}
+                {% if p.varies %}<small>varies by period</small>{% endif %}</td>
+            <td>{{ p.cadence|capitalize }}<small>{{ money(p.annual_value, 0 if p.annual_value == p.annual_value|round(0) else 2) }}/yr</small>
+                {% if p.reset_basis == 'anniversary' %}<small>cardmember year</small>{% endif %}</td>
+            <td>
+                <div class="bn-periods">
+                {% for cell in p.cells %}
+                    <button type="button"
+                            class="bn-cell bn-cell-{{ cell.state }}{% if cell.current %} bn-cell-now{% endif %}{% if cell.auto %} bn-cell-auto{% endif %}"
+                            data-card="{{ c.card_id }}" data-perk="{{ p.id }}"
+                            data-period="{{ cell.period }}" data-amount="{{ cell.amount }}"
+                            data-used="{{ cell.used }}"
+                            {% if cell.state == 'future' %}disabled{% endif %}
+                            title="{{ cell.period }} — {{ cell.state }}{% if cell.used %}, {{ money(cell.used, 2) }} used{% endif %}{% if cell.auto %} (from statement charges — click to confirm in full){% endif %}">
+                        {{ cell.label }}
+                    </button>
+                {% endfor %}
+                </div>
+            </td>
+            <td class="bn-row-actions">
+                <details class="bn-details">
+                    <summary>Edit</summary>
+                    <form method="post" action="{{ url_for('benefits_perk_save') }}" class="bn-inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="card_id" value="{{ c.card_id }}">
+                        <input type="hidden" name="perk_id" value="{{ p.id }}">
+                        <input type="hidden" name="year" value="{{ year }}">
+                        <label>Name<input type="text" name="name" value="{{ p.name }}" required></label>
+                        <label>Amount<input type="number" step="0.01" name="amount" value="{{ p.amount }}"></label>
+                        <label>Cadence
+                            <select name="cadence">
+                                {% for value, label in perk_cadences %}
+                                <option value="{{ value }}" {% if value == p.cadence %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select></label>
+                        <label>Resets on
+                            <select name="reset_basis">
+                                {% for value, label in reset_bases %}
+                                <option value="{{ value }}" {% if value == p.reset_basis %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select></label>
+                        <label>Ends on
+                            <input type="date" name="ends_on"
+                                   value="{{ p.ends_on.strftime('%Y-%m-%d') if p.ends_on else '' }}"></label>
+                        <label>Notes<input type="text" name="notes" value="{{ p.notes or '' }}"></label>
+                        <button type="submit">Save</button>
+                        <button type="submit" name="delete" value="1" class="bn-btn-danger">Delete</button>
+                    </form>
+                </details>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="bn-hint">Grey = not started, amber = open now, green = used, red = expired unused.
+       A <span class="bn-cell bn-cell-used bn-cell-auto bn-legend-chip">dotted</span> period was
+       filled in from qualifying charges on your statements, capped at what the credit is worth —
+       evidence you spent at the right merchant, not proof the issuer paid. Click any period to
+       set it to the full amount yourself; click again to drop back to what the statements show.</p>
+    {% endif %}
+
+    {% if c.benefits %}
+    <details class="bn-details bn-noncredit">
+        <summary>{{ c.benefit_count }} non-credit benefits
+            — lounge access, status, insurance</summary>
+        <p class="bn-hint">Reference only. These have no reset period and nothing to forfeit,
+           so they are deliberately left out of the credits-used and net-of-fee figures above —
+           a card shouldn't look like it pays for itself on benefits you can't spend.</p>
+        {% for group in c.benefits %}
+        <div class="bn-benefit-group">
+            <span class="bn-stat-label">{{ group.label }}</span>
+            <ul class="bn-benefit-list">
+                {% for b in group['items'] %}
+                <li>
+                    <strong>{{ b.name }}</strong>
+                    {% if b.notes %}<small>{{ b.notes }}</small>{% endif %}
+                    <form method="post" action="{{ url_for('benefits_card_benefit') }}"
+                          class="bn-benefit-del">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="card_id" value="{{ c.card_id }}">
+                        <input type="hidden" name="benefit_id" value="{{ b.id }}">
+                        <input type="hidden" name="year" value="{{ year }}">
+                        <button type="submit" name="delete" value="1" title="Remove">&times;</button>
+                    </form>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endfor %}
+
+        <form method="post" action="{{ url_for('benefits_card_benefit') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="card_id" value="{{ c.card_id }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <label>Add benefit<input type="text" name="name" placeholder="Priority Pass" required></label>
+            <label>Category
+                <select name="category">
+                    {% for value, label in benefit_categories %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select></label>
+            <label>Notes<input type="text" name="notes"></label>
+            <button type="submit">Add</button>
+        </form>
+    </details>
+    {% endif %}
+
+    <details class="bn-details bn-card-admin">
+        <summary>Card settings &amp; add a credit</summary>
+
+        <form method="post" action="{{ url_for('benefits_card_save') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="card_id" value="{{ c.card_id }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <label>Annual fee
+                <input type="number" step="0.01" name="annual_fee" value="{{ c.annual_fee or '' }}"></label>
+            <label>Fee posts in (anchors the cardmember year)
+                <select name="fee_month">
+                    <option value="">—</option>
+                    {% for m in range(1, 13) %}
+                    <option value="{{ m }}" {% if c.fee_month == m %}selected{% endif %}>
+                        {{ ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1] }}</option>
+                    {% endfor %}
+                </select></label>
+            <button type="submit">Save</button>
+        </form>
+
+        <form method="post" action="{{ url_for('benefits_perk_save') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="card_id" value="{{ c.card_id }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <label>New credit<input type="text" name="name" placeholder="Uber Cash" required></label>
+            <label>Amount<input type="number" step="0.01" name="amount" placeholder="15.00"></label>
+            <label>Cadence
+                <select name="cadence">
+                    {% for value, label in perk_cadences %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select></label>
+            <label>Resets on
+                <select name="reset_basis">
+                    {% for value, label in reset_bases %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select></label>
+            <label>Ends on<input type="date" name="ends_on"></label>
+            <label>Notes<input type="text" name="notes"></label>
+            <button type="submit">Add</button>
+        </form>
+
+        <form method="post" action="{{ url_for('benefits_perk_template') }}" class="bn-inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="card_id" value="{{ c.card_id }}">
+            <input type="hidden" name="year" value="{{ year }}">
+            <label>Load template
+                <select name="template">
+                    {% for key, tpl in perk_templates.items() %}
+                    <option value="{{ key }}">{{ tpl.label }} — {{ money(tpl.annual_fee) }} fee,
+                        {{ tpl.perks|length }} credits (checked {{ tpl.checked }})</option>
+                    {% endfor %}
+                </select></label>
+            <button type="submit" class="bn-btn-muted"
+                    onclick="return confirm('Replace this card\'s credits and annual fee with the template?')">
+                Replace credits</button>
+        </form>
+        <small class="bn-hint">Templates are a starting draft, researched from the issuer's own
+            pages on the date shown — issuers reshuffle these benefits constantly, so reconcile
+            the fee and every credit against your card's current terms. Credits with no fixed
+            reset (Global Entry / TSA PreCheck, purchase-gated offers) are left out on purpose,
+            since they would raise false expiry alerts.</small>
+    </details>
+</div>
+{% endfor %}
+
+{# ---------- Settings ---------- #}
+<h2 class="bn-h2">Settings</h2>
+<div class="data-entry">
+    <form method="post" action="{{ url_for('benefits_settings_save') }}" class="bn-inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <label>HSA coverage
+            <select name="hsa_coverage">
+                <option value="self" {% if settings.hsa_coverage == 'self' %}selected{% endif %}>Self-only</option>
+                <option value="family" {% if settings.hsa_coverage == 'family' %}selected{% endif %}>Family</option>
+            </select></label>
+        <label>Annual salary
+            <input type="number" step="0.01" name="annual_salary" value="{{ settings.annual_salary or '' }}"></label>
+        <label>Pay periods / year
+            <input type="number" name="pay_periods_per_year" value="{{ settings.pay_periods_per_year }}"></label>
+        <label class="bn-check">
+            <input type="checkbox" name="age_50_plus" {% if settings.age_50_plus %}checked{% endif %}>
+            50+ (401k/IRA catch-up)</label>
+        <label class="bn-check">
+            <input type="checkbox" name="age_55_plus" {% if settings.age_55_plus %}checked{% endif %}>
+            55+ (HSA catch-up)</label>
+
+        <div class="bn-limit-overrides">
+            <span class="bn-stat-label">{{ year }} limit overrides — leave blank to use the published figure</span>
+            <div class="bn-inline-form">
+            {% for kind, label in limit_kinds %}
+            <label>{{ label }}
+                <input type="number" step="0.01" name="limit_{{ kind }}"
+                       placeholder="{{ settings.limit_overrides.get(year|string, {}).get(kind) or '' }}"
+                       value="{{ settings.limit_overrides.get(year|string, {}).get(kind) or '' }}"></label>
+            {% endfor %}
+            </div>
+        </div>
+
+        <button type="submit">Save settings</button>
+    </form>
+</div>
+
+<div class="data-entry">
+    <h2>Link accounts to limits</h2>
+    <p class="bn-hint">HSA, 401(k), and IRA accounts pick up their bucket automatically.
+       Use this to point another account at a limit, exclude one, or record a payroll election
+       and employer match formula.</p>
+    {% for a in linkable %}
+    <form method="post" action="{{ url_for('benefits_account_config') }}" class="bn-inline-form bn-linkrow">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="account_id" value="{{ a.id }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <span class="bn-linkname">{{ a.name }}<small>{{ a.institution or a.account_type }}</small></span>
+        <label>Limit
+            <select name="limit_kind">
+                {% for kind, label in limit_kinds %}
+                <option value="{{ kind }}" {% if a.limit_kind == kind %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+                <option value="none" {% if a.limit_kind == 'none' %}selected{% endif %}>Not tracked</option>
+            </select></label>
+        <label>Per paycheck
+            <input type="number" step="0.01" name="per_paycheck" value="{{ a.per_paycheck or '' }}"></label>
+        <label>Match rate %
+            <input type="number" step="0.1" name="match_rate_pct" value="{{ a.match_rate_pct or '' }}"></label>
+        <label>Up to % of salary
+            <input type="number" step="0.1" name="match_limit_pct" value="{{ a.match_limit_pct or '' }}"></label>
+        <button type="submit">Save</button>
+    </form>
+    {% endfor %}
+    {% if not linkable %}
+    <p>No eligible accounts yet.</p>
+    {% endif %}
+</div>
+
+<script>
+(function () {
+    // Clicking a period cell toggles the credit between fully used and unused.
+    // A partially-used credit (set elsewhere) clears on the first click.
+    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+
+    document.querySelectorAll('.bn-cell').forEach(function (cell) {
+        cell.addEventListener('click', function () {
+            const amount = parseFloat(cell.dataset.amount) || 0;
+            const used = parseFloat(cell.dataset.used) || 0;
+            const next = used > 0 ? 0 : amount;
+
+            const body = new URLSearchParams({
+                card_id: cell.dataset.card,
+                perk_id: cell.dataset.perk,
+                period: cell.dataset.period,
+                amount_used: next,
+                csrf_token: csrf,
+            });
+
+            cell.disabled = true;
+            fetch('{{ url_for("benefits_perk_usage") }}', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded',
+                          'X-Requested-With': 'XMLHttpRequest'},
+                body: body,
+            }).then(function (r) {
+                if (!r.ok) throw new Error('save failed');
+                window.location.reload();
+            }).catch(function () {
+                cell.disabled = false;
+                alert('Could not save that credit. Try again.');
+            });
+        });
+    });
+})();
+</script>
+{% endblock %}

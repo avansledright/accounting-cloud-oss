@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Goals</h1>
+
+    <!-- Summary (money set aside; excludes debt-free / net-worth milestones) -->
+    <div class="summary-cards">
+        <div class="summary-card income">
+            <span class="summary-label">Total Saved</span>
+            <span class="summary-amount">${{ "%.2f"|format(total_saved) }}</span>
+        </div>
+        <div class="summary-card expenses">
+            <span class="summary-label">Total Target</span>
+            <span class="summary-amount">${{ "%.2f"|format(total_target) }}</span>
+        </div>
+        <div class="summary-card {{ 'positive' if total_saved >= total_target else 'negative' }}">
+            <span class="summary-label">Remaining</span>
+            <span class="summary-amount">${{ "%.2f"|format(total_target - total_saved) }}</span>
+        </div>
+    </div>
+
+    <!-- Add Goal Form -->
+    <div class="data-entry">
+        <h2>Add New Goal</h2>
+        <form method="POST" action="{{ url_for('add_goal') }}" class="goal-form" id="goal-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Goal Name:</label>
+                    <input type="text" id="name" name="name" placeholder="e.g., Emergency Fund" required>
+                </div>
+                <div class="form-group">
+                    <label for="goal_type">Goal Type:</label>
+                    <select id="goal_type" name="goal_type" onchange="updateGoalFields()">
+                        {% for value, label in goal_types %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category:</label>
+                    <select id="category" name="category">
+                        {% for value, label in goal_categories %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <!-- Target amount: manual / account / retirement / networth -->
+                <div class="form-group goal-field" data-for="manual account retirement networth">
+                    <label for="target_amount">Target Amount:</label>
+                    <input type="number" id="target_amount" name="target_amount" placeholder="0.00" step="0.01">
+                </div>
+                <!-- Current amount: manual only -->
+                <div class="form-group goal-field" data-for="manual">
+                    <label for="current_amount">Current Amount:</label>
+                    <input type="number" id="current_amount" name="current_amount" placeholder="0.00" step="0.01" value="0">
+                </div>
+                <!-- Months of expenses: emergency -->
+                <div class="form-group goal-field" data-for="emergency">
+                    <label for="months_target">Months of Expenses:</label>
+                    <input type="number" id="months_target" name="months_target" placeholder="e.g., 6" step="0.5">
+                </div>
+                <!-- Baseline debt (optional): debt_free / debt_payoff -->
+                <div class="form-group goal-field" data-for="debt_free debt_payoff">
+                    <label for="baseline_amount">Starting Debt <small>(blank = use current)</small>:</label>
+                    <input type="number" id="baseline_amount" name="baseline_amount" placeholder="auto" step="0.01">
+                </div>
+                <!-- Target date -->
+                <div class="form-group goal-field" data-for="manual account retirement networth emergency">
+                    <label for="target_date">Target Date:</label>
+                    <input type="date" id="target_date" name="target_date">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <!-- Linked accounts: account / emergency / retirement -->
+                <div class="form-group goal-field" data-for="account emergency retirement">
+                    <label for="linked_account_ids">Linked Accounts <small>(ctrl/cmd-click for multiple)</small>:</label>
+                    <select id="linked_account_ids" name="linked_account_ids" multiple size="5">
+                        {% for a in accounts %}
+                        <option value="{{ a._id }}">{{ a.name }}{% if a.institution %} · {{ a.institution }}{% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="field-hint" data-for="emergency">Leave empty to track all checking + savings balances.</small>
+                </div>
+                <!-- Linked debt: debt_payoff -->
+                <div class="form-group goal-field" data-for="debt_payoff">
+                    <label for="linked_debt_id">Debt to Pay Off:</label>
+                    <select id="linked_debt_id" name="linked_debt_id">
+                        <option value="">— select a debt —</option>
+                        {% for d in debts %}
+                        <option value="{{ d._id }}">{{ d.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes:</label>
+                    <input type="text" id="notes" name="notes" placeholder="Optional notes">
+                </div>
+            </div>
+
+            <p class="goal-type-hint" id="goal-type-hint"></p>
+            <button type="submit">Add Goal</button>
+        </form>
+    </div>
+
+    <!-- Goals List -->
+    <div class="goals-grid">
+        {% for goal in goals %}
+        <div class="goal-card {% if goal.live %}goal-live{% endif %}">
+            <div class="goal-header">
+                <h3>{{ goal.name }}</h3>
+                <span class="goal-category">{{ goal.type_label }}</span>
+            </div>
+
+            <div class="goal-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ goal.progress }}%"></div>
+                </div>
+                <div class="progress-text">
+                    {% if goal.goal_type in ('debt_free', 'debt_payoff') %}
+                        <span>${{ "%.2f"|format(goal.current_amount) }} paid of ${{ "%.2f"|format(goal.target_amount) }}</span>
+                    {% else %}
+                        <span>${{ "%.2f"|format(goal.current_amount) }} of ${{ "%.2f"|format(goal.target_amount) }}</span>
+                    {% endif %}
+                    <span>{{ "%.0f"|format(goal.progress) }}%</span>
+                </div>
+            </div>
+
+            {% if goal.live %}
+            <div class="goal-live-detail">
+                {% if goal.goal_type in ('debt_free', 'debt_payoff') %}
+                    <span class="live-badge">${{ "%.2f"|format(goal.remaining_debt) }} left to pay off</span>
+                {% elif goal.goal_type == 'emergency' %}
+                    <span class="live-badge">
+                        {{ "%.1f"|format(goal.months_covered) }} months covered
+                        {% if goal.monthly_expense %}· ${{ "%.0f"|format(goal.monthly_expense) }}/mo expenses{% endif %}
+                    </span>
+                {% elif goal.goal_type == 'retirement' %}
+                    {% if goal.eta_label %}
+                        <span class="live-badge">On track to hit target ~{{ goal.eta_label }} ({{ goal.eta_human }})</span>
+                    {% else %}
+                        <span class="live-badge">Projected to reach target beyond 50-year horizon</span>
+                    {% endif %}
+                {% else %}
+                    <span class="live-badge">Live · ${{ "%.2f"|format(goal.remaining) }} to go</span>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if goal.plan %}
+            <div class="goal-plan">
+                <strong>{{ goal.plan.strategy_label }}</strong> plan · next: <strong>{{ goal.plan.target_name }}</strong>
+                {% if goal.plan.extra > 0 %}· ${{ "%.0f"|format(goal.plan.extra) }}/mo extra{% endif %}<br>
+                {% if goal.plan.debtfree_label %}All debt free ~<strong>{{ goal.plan.debtfree_label }}</strong> ({{ goal.plan.months_to_free }} mo){% endif %}
+                {% if goal.plan.interest_saved > 0 %}· saves ${{ "{:,.0f}".format(goal.plan.interest_saved) }} interest{% endif %}
+                {% if not goal.plan.fits %}<br><span style="color:#a12a1e;">⚠ over budget</span>{% endif %}
+                · <a href="{{ url_for('debts_page') }}">Manage plan →</a>
+            </div>
+            {% endif %}
+
+            {% if goal.target_date %}
+            <div class="goal-deadline">
+                {% if goal.days_remaining is not none %}
+                    {% if goal.days_remaining > 0 %}
+                        <span class="days-remaining">{{ goal.days_remaining }} days left</span>
+                    {% elif goal.days_remaining == 0 %}
+                        <span class="days-remaining urgent">Due today!</span>
+                    {% else %}
+                        <span class="days-remaining overdue">{{ -goal.days_remaining }} days overdue</span>
+                    {% endif %}
+                {% endif %}
+                <span class="target-date">Target: {{ goal.target_date }}</span>
+            </div>
+            {% endif %}
+
+            {% if goal.notes %}
+            <p class="goal-notes">{{ goal.notes }}</p>
+            {% endif %}
+
+            {% if not goal.live %}
+            <!-- Quick Contribute Form (manual goals only) -->
+            <form class="contribute-form" method="POST" action="{{ url_for('contribute_to_goal', goal_id=goal._id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="number" name="amount" placeholder="Amount" step="0.01" required>
+                <button type="submit" class="action-btn update-btn">Add</button>
+            </form>
+            {% endif %}
+
+            <div class="goal-actions">
+                <a href="{{ url_for('edit_goal', goal_id=goal._id) }}" class="action-btn edit-btn">Edit</a>
+                <form class="inline-form" method="POST" action="{{ url_for('delete_goal', goal_id=goal._id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this goal?')">Delete</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No goals yet. Create your first goal above!</p>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        var GOAL_TYPE_HINTS = {
+            'manual':      'Track progress by hand with the Contribute box on the goal card.',
+            'account':     'Progress updates automatically from the combined live balance of the linked accounts.',
+            'emergency':   'Target auto-computes as your months × current monthly expenses; progress tracks your liquid savings.',
+            'retirement':  'Links retirement/investment accounts to a target and projects an ETA using each account’s return rate.',
+            'networth':    'Tracks your live net worth: all accounts + assets minus every debt.',
+            'debt_free':   'Global payoff of all standalone debt (credit cards, loans, medical). Excludes mortgages & auto loans tied to assets, since those have offsetting value.',
+            'debt_payoff': 'Tracks the amortized paydown of one specific debt from its current balance.'
+        };
+        function updateGoalFields() {
+            var type = document.getElementById('goal_type').value;
+            document.querySelectorAll('#goal-form .goal-field').forEach(function (el) {
+                var types = (el.getAttribute('data-for') || '').split(/\s+/);
+                el.style.display = types.indexOf(type) !== -1 ? '' : 'none';
+            });
+            document.querySelectorAll('#goal-form .field-hint').forEach(function (el) {
+                var types = (el.getAttribute('data-for') || '').split(/\s+/);
+                el.style.display = types.indexOf(type) !== -1 ? '' : 'none';
+            });
+            document.getElementById('goal-type-hint').textContent = GOAL_TYPE_HINTS[type] || '';
+        }
+        updateGoalFields();
+    </script>
+{% endblock %}

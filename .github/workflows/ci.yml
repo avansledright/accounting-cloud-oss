@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Compile all modules
+        run: python -m compileall -q app.py models.py benefits.py home_move.py mcp_server.py payroll_forms.py payroll_validator.py agent scripts
+      - name: Unit tests
+        run: pytest -q tests
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and start the stack
+        run: |
+          cp .env.example .env
+          sed -i "s/^SECRET_KEY=.*/SECRET_KEY=ci-$(openssl rand -hex 16)/" .env
+          sed -i "s/^MCP_API_TOKEN=.*/MCP_API_TOKEN=ci-token/" .env
+          docker compose --profile mcp up -d --build --wait --wait-timeout 180
+      - name: Health check and page smoke test (empty database)
+        run: |
+          curl -fsS http://127.0.0.1:5052/health
+          for p in / /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /tools/home-move /analytics /calendar /reports /admin /payroll /transfers; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5052$p")
+            echo "$code $p"; [ "$code" = 200 ]
+          done
+      - name: Seed demo data and re-check pages
+        run: |
+          docker compose exec -T web python scripts/seed_demo.py
+          for p in / /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /analytics; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5052$p")
+            echo "$code $p"; [ "$code" = 200 ]
+          done
+      - name: MCP server requires the token
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8765/http)" = 401
+          curl -fsS -X POST http://127.0.0.1:8765/http \
+            -H "Authorization: Bearer ci-token" -H "Content-Type: application/json" \
+            -H "Accept: application/json, text/event-stream" \
+            -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"account_balances","arguments":{}}}' | grep -q "Demo Checking"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile mcp logs

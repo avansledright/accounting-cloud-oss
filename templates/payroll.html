@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Payroll</h1>
+    <p class="muted">Household employer payroll — tracks wages, FICA, FUTA/SUTA, and income tax withholding for W-2 and Schedule H preparation.</p>
+
+    <div class="breadcrumbs" style="margin-bottom:1rem;">
+        <a href="{{ url_for('payroll_run') }}" class="btn">Run Payroll</a>
+        <a href="{{ url_for('payroll_employee_form') }}" class="btn">Add Employee</a>
+        <a href="{{ url_for('payroll_settings_page') }}" class="btn">Settings</a>
+        <a href="{{ url_for('payroll_schedule_h', year=year) }}" class="btn">Schedule H ({{ year }})</a>
+        <a href="{{ url_for('payroll_year_end_zip', year=year-1) }}" class="btn btn-primary">Generate {{ year-1 }} Tax Forms</a>
+        <a href="{{ url_for('payroll_validate', year=year-1) }}" class="btn">Validate {{ year-1 }}</a>
+        <a href="{{ url_for('payroll_year_end_zip', year=year) }}" class="btn">Generate {{ year }} Tax Forms (preview)</a>
+        <a href="{{ url_for('payroll_forms_inspect') }}" class="btn">Inspect Form Templates</a>
+    </div>
+
+    {% if not settings.employer_ein %}
+    <div class="data-entry" style="border-left:4px solid #c66;">
+        <strong>Set up required.</strong> Add your EIN and employer info in <a href="{{ url_for('payroll_settings_page') }}">Payroll Settings</a> before running payroll.
+    </div>
+    {% endif %}
+
+    <!-- Employees -->
+    <div class="data-entry">
+        <h2>Employees</h2>
+        {% if employees %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Pay</th>
+                    <th>Frequency</th>
+                    <th>State</th>
+                    <th>YTD Gross</th>
+                    <th>YTD Net</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in employees %}
+                <tr>
+                    <td><strong>{{ emp.name }}</strong>{% if emp.relationship %} <span class="muted">({{ emp.relationship }})</span>{% endif %}</td>
+                    <td>${{ "%.2f"|format(emp.pay_rate or 0) }} {% if emp.pay_type == 'hourly' %}/hr{% else %}/period{% endif %}</td>
+                    <td>{{ emp.pay_frequency|title }}</td>
+                    <td>{{ emp.state or settings.state }}</td>
+                    <td>{% if emp.ytd %}${{ "%.2f"|format(emp.ytd.gross) }}{% else %}—{% endif %}</td>
+                    <td>{% if emp.ytd %}${{ "%.2f"|format(emp.ytd.net) }}{% else %}—{% endif %}</td>
+                    <td>{% if emp.active %}Active{% else %}Inactive{% endif %}</td>
+                    <td>
+                        <a href="{{ url_for('payroll_employee_form', employee_id=emp._id_str) }}">Edit</a>
+                        &middot;
+                        <a href="{{ url_for('payroll_w2', employee_id=emp._id_str, year=year) }}">W-2</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No employees yet. <a href="{{ url_for('payroll_employee_form') }}">Add one</a> to get started.</p>
+        {% endif %}
+    </div>
+
+    <!-- Recent entries -->
+    <div class="data-entry">
+        <h2>Recent Payroll Runs</h2>
+        {% if entries %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Pay Date</th>
+                    <th>Employee</th>
+                    <th>Period</th>
+                    <th>Gross</th>
+                    <th>FICA (ee)</th>
+                    <th>FIT</th>
+                    <th>SIT</th>
+                    <th>Net</th>
+                    <th>ER Taxes</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr>
+                    <td>{{ e.pay_date.strftime('%Y-%m-%d') if e.pay_date.strftime is defined else e.pay_date }}</td>
+                    <td>{{ e.employee_name }}</td>
+                    <td>{{ e.period_start.strftime('%m/%d') if e.period_start.strftime is defined else e.period_start }} – {{ e.period_end.strftime('%m/%d') if e.period_end.strftime is defined else e.period_end }}</td>
+                    <td>${{ "%.2f"|format(e.gross_wages or 0) }}</td>
+                    <td>${{ "%.2f"|format((e.ee_ss or 0) + (e.ee_medicare or 0) + (e.ee_addl_medicare or 0)) }}</td>
+                    <td>${{ "%.2f"|format(e.ee_fit or 0) }}</td>
+                    <td>${{ "%.2f"|format(e.ee_sit or 0) }}</td>
+                    <td><strong>${{ "%.2f"|format(e.net_pay or 0) }}</strong></td>
+                    <td>${{ "%.2f"|format((e.er_ss or 0) + (e.er_medicare or 0) + (e.er_futa or 0) + (e.er_suta or 0)) }}</td>
+                    <td>
+                        <form method="POST" action="{{ url_for('payroll_entry_delete', entry_id=e._id) }}" style="display:inline;" onsubmit="return confirm('Delete this payroll entry? The linked ledger transaction will also be removed.');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="link-button">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="muted">No payroll runs yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- YTD Summary -->
+    {% if employees and employees[0].ytd %}
+    <div class="data-entry">
+        <h2>YTD Summary ({{ year }})</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Runs</th>
+                    <th>Gross</th>
+                    <th>EE SS</th>
+                    <th>EE Medicare</th>
+                    <th>EE FIT</th>
+                    <th>EE SIT</th>
+                    <th>ER SS</th>
+                    <th>ER Medicare</th>
+                    <th>ER FUTA</th>
+                    <th>ER SUTA</th>
+                    <th>Net Paid</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for emp in employees %}
+                {% if emp.ytd %}
+                <tr>
+                    <td>{{ emp.name }}</td>
+                    <td>{{ emp.ytd.count }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.gross) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.ee_ss) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.ee_medicare) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.ee_fit) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.ee_sit) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.er_ss) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.er_medicare) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.er_futa) }}</td>
+                    <td>${{ "%.2f"|format(emp.ytd.er_suta) }}</td>
+                    <td><strong>${{ "%.2f"|format(emp.ytd.net) }}</strong></td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+{% endblock %}

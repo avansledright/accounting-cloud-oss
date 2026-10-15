@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1>Accounts</h1>
+
+    <!-- Sub-navigation -->
+    {% set cash_accounts = accounts | selectattr('account_type', 'in', ['checking', 'savings']) | list %}
+    {% set investment_accounts = accounts | selectattr('account_type', 'in', investment_account_types) | list %}
+    {% set other_accounts = accounts | selectattr('account_type', 'equalto', 'other') | list %}
+    <nav class="sub-nav">
+        <a href="#add-account" class="sub-nav-link">+ Add Account</a>
+        {% if cash_accounts %}<a href="#cash-accounts" class="sub-nav-link">Cash ({{ cash_accounts|length }})</a>{% endif %}
+        {% if investment_accounts %}<a href="#investment-accounts" class="sub-nav-link">Investments ({{ investment_accounts|length }})</a>{% endif %}
+        {% if other_accounts %}<a href="#other-accounts" class="sub-nav-link">Other ({{ other_accounts|length }})</a>{% endif %}
+    </nav>
+
+    <!-- Summary Cards -->
+    <div class="summary-cards">
+        <div class="summary-card income">
+            <span class="summary-label">Cash Accounts</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.cash_total) }}</span>
+        </div>
+        <div class="summary-card investments">
+            <span class="summary-label">Investment Accounts</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.investment_total) }}</span>
+        </div>
+        <div class="summary-card {{ 'positive' if summary.total >= 0 else 'negative' }}">
+            <span class="summary-label">Total Balance</span>
+            <span class="summary-amount">${{ "%.2f"|format(summary.total) }}</span>
+        </div>
+    </div>
+
+    <!-- Add Account Form -->
+    <div class="data-entry" id="add-account">
+        <h2>Add Account</h2>
+        <form method="POST" action="{{ url_for('add_account') }}" class="account-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Account Name:</label>
+                    <input type="text" id="name" name="name" placeholder="e.g., Main Checking" required>
+                </div>
+                <div class="form-group">
+                    <label for="account_type">Account Type:</label>
+                    <select id="account_type" name="account_type" required>
+                        {% for value, label in account_types %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="institution">Institution:</label>
+                    <input type="text" id="institution" name="institution" placeholder="e.g., Example Bank" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="balance">Starting Balance:</label>
+                    <input type="number" id="balance" name="balance" placeholder="0.00" step="0.01" value="0">
+                </div>
+                <div class="form-group">
+                    <label for="account_number">Account # (last 4):</label>
+                    <input type="text" id="account_number" name="account_number" placeholder="1234" maxlength="4">
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes:</label>
+                    <input type="text" id="notes" name="notes" placeholder="Optional notes">
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="is_primary" name="is_primary">
+                        Primary Account (for ledger)
+                    </label>
+                </div>
+            </div>
+            <div class="form-row investment-fields" id="investment-fields" style="display: none;">
+                <div class="form-group">
+                    <label for="management_type">Management:</label>
+                    <select id="management_type" name="management_type">
+                        <option value="">N/A</option>
+                        <option value="managed">Managed</option>
+                        <option value="self_managed">Self-Managed</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="estimated_return_rate">Est. Annual Return (%):</label>
+                    <input type="number" id="estimated_return_rate" name="estimated_return_rate" placeholder="e.g., 7.0" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="balance_as_of_date">Balance As-Of Date:</label>
+                    <input type="date" id="balance_as_of_date" name="balance_as_of_date">
+                </div>
+            </div>
+            <button type="submit">Add Account</button>
+        </form>
+    </div>
+
+    <!-- Cash Accounts -->
+    {% if cash_accounts %}
+    <div class="account-section" id="cash-accounts">
+        <h2>Cash Accounts</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Account Name</th>
+                    <th>Type</th>
+                    <th>Institution</th>
+                    <th>Balance</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in cash_accounts %}
+                <tr>
+                    <td data-label="Account Name">
+                        <a href="{{ url_for('account_detail', account_id=account._id) }}" class="account-link">{{ account.name }}</a>
+                        {% if account.account_number %}<small class="account-number">(...{{ account.account_number }})</small>{% endif %}
+                        {% if account.is_primary %}<span class="badge badge-primary">Primary</span>{% endif %}
+                    </td>
+                    <td data-label="Type">{{ dict(account_types).get(account.account_type, account.account_type) }}</td>
+                    <td data-label="Institution">{{ account.institution }}</td>
+                    <td data-label="Balance">
+                        <span class="{{ 'positive-amount' if account.balance >= 0 else 'negative-balance' }}">${{ "%.2f"|format(account.balance) }}</span>
+                    </td>
+                    <td data-label="Actions" class="actions-cell">
+                        <form class="inline-balance-form" method="POST" action="{{ url_for('update_account_balance', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="number" name="balance" value="{{ account.balance }}" step="0.01" class="balance-input">
+                            <button type="submit" class="action-btn update-btn">Update</button>
+                        </form>
+                        <a href="{{ url_for('edit_account', account_id=account._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_account', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this account?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <!-- Investment Accounts -->
+    {% if investment_accounts %}
+    <div class="account-section" id="investment-accounts">
+        <h2>Investment Accounts</h2>
+        <div class="table-scroll-wrapper">
+        <table class="account-table account-table-investment">
+            <thead>
+                <tr>
+                    <th>Account</th>
+                    <th>Type</th>
+                    <th>Institution</th>
+                    <th>Balance</th>
+                    <th>As Of</th>
+                    <th>Return</th>
+                    <th>Mgmt</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in investment_accounts %}
+                <tr>
+                    <td data-label="Account Name">
+                        <a href="{{ url_for('account_detail', account_id=account._id) }}" class="account-link">{{ account.name }}</a>
+                        {% if account.account_number %}<small class="account-number">(...{{ account.account_number }})</small>{% endif %}
+                        {% if account.is_primary %}<span class="badge badge-primary">Primary</span>{% endif %}
+                    </td>
+                    <td data-label="Type">{{ dict(account_types).get(account.account_type, account.account_type) }}</td>
+                    <td data-label="Institution">{{ account.institution }}</td>
+                    <td data-label="Balance">
+                        <span class="{{ 'positive-amount' if account.balance >= 0 else 'negative-balance' }}">${{ "%.2f"|format(account.balance) }}</span>
+                    </td>
+                    <td data-label="As Of">
+                        {% if account.get('balance_as_of_date') %}
+                            {{ account.balance_as_of_date.strftime('%m/%d/%y') if account.balance_as_of_date is not string else account.balance_as_of_date[:10] }}
+                        {% else %}
+                            --
+                        {% endif %}
+                    </td>
+                    <td data-label="Return">
+                        {% if account.get('estimated_return_rate') is not none %}
+                            {{ "%.1f"|format(account.estimated_return_rate) }}%
+                        {% else %}
+                            --
+                        {% endif %}
+                    </td>
+                    <td data-label="Mgmt">
+                        {% if account.get('management_type') == 'managed' %}
+                            <span class="badge badge-actual">Managed</span>
+                        {% elif account.get('management_type') == 'self_managed' %}
+                            <span class="badge badge-projected">Self-Managed</span>
+                        {% else %}
+                            --
+                        {% endif %}
+                    </td>
+                    <td data-label="Actions" class="actions-cell">
+                        <form class="inline-balance-form" method="POST" action="{{ url_for('update_account_balance', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="number" name="balance" value="{{ account.balance }}" step="0.01" class="balance-input">
+                            <button type="submit" class="action-btn update-btn">Update</button>
+                        </form>
+                        <a href="{{ url_for('edit_account', account_id=account._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_account', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this account?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Other Accounts -->
+    {% if other_accounts %}
+    <div class="account-section" id="other-accounts">
+        <h2>Other Accounts</h2>
+        <table class="account-table">
+            <thead>
+                <tr>
+                    <th>Account Name</th>
+                    <th>Type</th>
+                    <th>Institution</th>
+                    <th>Balance</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for account in other_accounts %}
+                <tr>
+                    <td data-label="Account Name">
+                        {{ account.name }}
+                        {% if account.account_number %}<small class="account-number">(...{{ account.account_number }})</small>{% endif %}
+                        {% if account.is_primary %}<span class="badge badge-primary">Primary</span>{% endif %}
+                    </td>
+                    <td data-label="Type">{{ dict(account_types).get(account.account_type, account.account_type) }}</td>
+                    <td data-label="Institution">{{ account.institution }}</td>
+                    <td data-label="Balance">
+                        <span class="{{ 'positive-amount' if account.balance >= 0 else 'negative-balance' }}">${{ "%.2f"|format(account.balance) }}</span>
+                    </td>
+                    <td data-label="Actions" class="actions-cell">
+                        <form class="inline-balance-form" method="POST" action="{{ url_for('update_account_balance', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="number" name="balance" value="{{ account.balance }}" step="0.01" class="balance-input">
+                            <button type="submit" class="action-btn update-btn">Update</button>
+                        </form>
+                        <a href="{{ url_for('edit_account', account_id=account._id) }}" class="action-btn edit-btn">Edit</a>
+                        <form class="inline-form" method="POST" action="{{ url_for('delete_account', account_id=account._id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="action-btn delete-btn" onclick="return confirm('Delete this account?')">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if not accounts %}
+    <div class="empty-state">
+        <p>No accounts added yet. Add your first account above to get started.</p>
+    </div>
+    {% endif %}
+
+    <script>
+        // Show/hide investment fields based on account type selection
+        const accountTypeSelect = document.getElementById('account_type');
+        const investmentFields = document.getElementById('investment-fields');
+        const investmentTypes = {{ investment_account_types | tojson }};
+
+        function toggleInvestmentFields() {
+            if (investmentFields) {
+                investmentFields.style.display = investmentTypes.includes(accountTypeSelect.value) ? 'flex' : 'none';
+            }
+        }
+
+        if (accountTypeSelect) {
+            accountTypeSelect.addEventListener('change', toggleInvestmentFields);
+            toggleInvestmentFields();
+        }
+    </script>
+{% endblock %}
