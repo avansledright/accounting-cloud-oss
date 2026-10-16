@@ -21,11 +21,40 @@ page JavaScript send the CSRF token in a header (see `getHeaders()` in
 
 The examples on this page use invented figures.
 
+## Setup wizard (`/setup`)
+
+On a fresh install (`needs_first_run_setup()`: no accounts, and setup neither
+completed nor skipped) the dashboard redirects to `/setup/welcome`. The steps
+are `welcome`, `account`, `income`, `bills`, `extras` and `done`
+(`setup_step()`, `templates/setup.html`). They create records through the same
+helpers as the normal pages (`_create_account`, `_create_recurring_item`,
+`_create_debt`). State lives in the `app_settings` singleton (`_id: 'app'`):
+`setup_completed`, `setup_skipped`, `household_name`, `checklist_dismissed`.
+
+- Income and bill rows take a frequency and the next pay/due date. Monthly
+  items start today (their day of month carries the schedule); weekly and
+  bi-weekly items are re-anchored on their next occurrence on or after today;
+  yearly and bi-monthly items keep the due date's month. "Twice a month" is a
+  monthly item with two days, e.g. `1,15`. So nothing is projected before the
+  balance entered for today.
+- Re-saving the account step updates the existing primary account.
+- `POST /setup/demo` loads `demo_data.load_demo_data()` (empty database only),
+  `POST /setup/skip` skips, and `POST /setup/restart` (Admin) re-opens the
+  wizard without touching data.
+
+A walkthrough for users is in [getting-started.md](getting-started.md).
+
 ## Dashboard (`/`)
 
 The home page (`index()`, `templates/dashboard.html`) is a high-signal
 snapshot. Before rendering it runs `_apply_auto_links()` so loan payments are
 attached (see [Debts](#debts-debts)).
+
+A **Getting started** checklist (`getting_started_checklist()`) sits at the
+top until every item is done or it is hidden (`POST /setup/checklist/dismiss`;
+Admin can show it again). Items tick off from data: a primary account,
+recurring income, recurring bills, budget targets, a recorded transaction, an
+imported card statement, and a net worth snapshot.
 
 The summary strip shows the primary account balance, cash total
 (`CASH_ACCOUNT_TYPES`), investment total (`INVESTMENT_ACCOUNT_TYPES`), net
@@ -424,7 +453,7 @@ balance and lowest balance.
 ## Payroll (`/payroll`)
 
 Payroll supports a **household employer** (for example, someone paying a
-nanny or caregiver directly): pay runs with withholding, year-end W-2s,
+caregiver or housekeeper directly): pay runs with withholding, year-end W-2s,
 Schedule H and the SSA electronic W-2 file.
 
 > **Tax figures must be verified every year.** `PAYROLL_DEFAULTS` in
@@ -501,7 +530,8 @@ exports. Protect the database and backups accordingly.
 
 ## Admin (`/admin`)
 
-`admin_page()` shows document counts for the main collections and **data
+`admin_page()` has **Re-run setup wizard** and **Show getting-started
+checklist** buttons, document counts for the main collections, and **data
 health checks**: holdings pointing at missing accounts, dividends pointing at
 missing holdings, and budget items pointing at missing accounts.
 

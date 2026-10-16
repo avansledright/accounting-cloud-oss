@@ -228,6 +228,7 @@ There are also per-collection CSV exports and imports (`/export/csv/transactions
 | [`payroll_settings`](#payroll_settings) | Singleton payroll tax settings |
 | [`form_templates`](#form_templates) | Uploaded IRS fillable PDF templates |
 | [`dashboard_prefs`](#dashboard_prefs) | Singleton dashboard card layout |
+| [`app_settings`](#app_settings) | Singleton first-run setup state and household name |
 | [`app_migrations`](#app_migrations) | Markers for one-time data migrations |
 
 ### accounts
@@ -673,6 +674,24 @@ Singleton written by `save_dashboard_layout` (deleted on reset).
 |---|---|---|
 | `cards` | list of dict | Ordered `{key, span (1-4), visible}` entries; keys from `DASHBOARD_CARD_DEFS` |
 | `updated` | datetime | |
+
+### app_settings
+
+Singleton with `_id: 'app'`, written by the setup wizard (`/setup/*`) and the
+dashboard checklist.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `setup_completed` | bool | Wizard reached its last step (or demo data was loaded); stops the first-run redirect |
+| `setup_completed_at`, `setup_started_at` | datetime | |
+| `setup_skipped` | bool | "Skip setup" was chosen; also stops the redirect |
+| `household_name` | string or null | Shown on the dashboard |
+| `checklist_dismissed` | bool | Hides the dashboard getting-started checklist |
+| `demo_data` | bool | Set when the wizard loaded the demo data set |
+| `updated_at` | datetime | |
+
+The dashboard redirects to the wizard only while neither flag is set **and**
+there are no accounts, so existing databases never see it.
 
 ### app_migrations
 

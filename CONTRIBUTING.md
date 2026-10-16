@@ -16,7 +16,7 @@ See [docs/development.md](docs/development.md). Short version:
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt pytest
+pip install -r requirements-dev.txt
 docker run -d --name acct-mongo -p 127.0.0.1:27017:27017 mongo:7.0
 cp .env.example .env            # set SECRET_KEY
 flask --app app run --debug     # http://127.0.0.1:5000

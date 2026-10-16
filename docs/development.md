@@ -80,7 +80,9 @@ python scripts/seed_demo.py
 docker compose exec web python scripts/seed_demo.py
 ```
 
-It reads `MONGO_URI` and `MONGO_DB_NAME` like the app.
+It reads `MONGO_URI` and `MONGO_DB_NAME` like the app. The data set itself
+lives in `demo_data.py` (`load_demo_data(db, force=False)`), which is also
+what the setup wizard's **Load demo data instead** button calls.
 
 - **Refuses on a non-empty database.** If the `accounts` collection has any
   documents, it exits with an error.
@@ -94,19 +96,20 @@ It reads `MONGO_URI` and `MONGO_DB_NAME` like the app.
 ## Tests
 
 ```bash
-pip install pytest
+pip install -r requirements-dev.txt   # requirements.txt + pytest + mongomock
 pytest tests/
 ```
 
-`pytest` is not in `requirements.txt`; install it separately.
-
-The suite covers **pure modules only**, because `app.py` opens a MongoDB
-connection and starts threads when it is imported:
+Most of the suite covers pure modules. Route tests swap in
+[mongomock](https://github.com/mongomock/mongomock) before importing `app.py`
+(which connects to MongoDB at import time), so no database is needed; they
+are skipped if mongomock is not installed.
 
 | File | Covers |
 |---|---|
 | `tests/test_pure_modules.py` | `home_move` (payments, transfer taxes, PMI), `benefits`, `payroll_validator` |
 | `tests/test_prompts.py` | `agent.prompts`: the generic default profile, and brace escaping for a profile file |
+| `tests/test_setup_wizard.py` | First-run redirect, each setup wizard step's records, skip/done/restart, demo-data mode, the getting-started checklist and empty-state pages (mongomock) |
 | `tests/conftest.py` | Puts the project root on `sys.path` |
 
 Keep new business logic in importable modules with no database dependency
@@ -117,13 +120,14 @@ unit tested here.
 
 `.github/workflows/ci.yml` has two jobs:
 
-1. **test**: Python 3.12, `pip install -r requirements.txt` plus pytest,
+1. **test**: Python 3.12, `pip install -r requirements-dev.txt`,
    `python -m compileall` over every module, then `pytest -q tests`.
 2. **docker-smoke**: copies `.env.example` to `.env` with a generated
    `SECRET_KEY` and a test `MCP_API_TOKEN`, runs
    `docker compose --profile mcp up -d --build --wait`, then:
    - `curl -fsS http://127.0.0.1:5052/health`,
-   - checks that the main pages return 200 on an empty database,
+   - checks that `/` redirects to the setup wizard on an empty database and
+     that the main pages return 200,
    - runs `scripts/seed_demo.py` and checks the main pages again,
    - checks that the MCP server returns 401 without the token and that an
      authenticated `tools/call` to `account_balances` returns the demo
@@ -284,9 +288,10 @@ templates/                Jinja2 templates; base.html holds the sidebar
 static/style.css          Stylesheet
 static/main.js            Shared page JavaScript (transactions, overrides, ...)
 forms/                    IRS form field maps and README; drop fillable PDFs here
-scripts/seed_demo.py      Demo data loader
+demo_data.py              Demo data set (setup wizard button and seed script)
+scripts/seed_demo.py      Demo data loader (CLI)
 scripts/backup-accounting.sh  JSON backup via /export
-tests/                    pytest suite for the pure modules
+tests/                    pytest suite (pure modules + mongomock route tests)
 deploy/kubernetes/        Example Kubernetes manifests
 Dockerfile, docker-compose.yml, .env.example
 ```

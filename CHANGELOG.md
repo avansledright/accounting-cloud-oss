@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- First-run setup wizard (`/setup`): welcome and household name, primary
+  account, recurring income, recurring bills, optional accounts and debts, and
+  a summary with the first projected months. A fresh install's dashboard
+  redirects to it; it can be skipped, and re-run from Admin.
+- "Load demo data instead" on the wizard; the demo data set moved to
+  `demo_data.py` (the `scripts/seed_demo.py` CLI is unchanged).
+- Dashboard "Getting started" checklist that ticks off from real data, and
+  guidance on empty Ledger, Budget, Cards and Net Worth pages.
+- `docs/getting-started.md` walkthrough; mongomock route tests
+  (`requirements-dev.txt`).
+
 ## [0.1.0] - 2026-10-15
 
 First public, self-hostable release, extracted from a privately run household

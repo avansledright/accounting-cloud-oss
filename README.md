@@ -83,6 +83,10 @@ A page-by-page tour is in [docs/features.md](docs/features.md).
 
 ## Quick start
 
+> **New here? Follow [docs/getting-started.md](docs/getting-started.md)**: a
+> step-by-step walkthrough from install to the setup wizard and your first
+> week of use, with the core concepts explained.
+
 Requires Docker with the Compose plugin.
 
 ```bash
@@ -94,11 +98,13 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 docker compose up -d --build
 ```
 
-Open <http://localhost:5052>, go to **Accounts**, add your checking account
-and mark it primary. Then add recurring income and bills on **Budget**, and
-the ledger fills in its projection.
+Open <http://localhost:5052>. A fresh install starts a short **setup
+wizard**: your primary checking account, recurring income, regular bills and
+optional extras. The ledger then shows a 12-month projection, and a
+getting-started checklist on the dashboard covers the rest.
 
-Want to look around first? Load fake demo data into the empty database:
+Want to look around first? Click **Load demo data instead** on the wizard's
+first page, or from the command line:
 
 ```bash
 docker compose exec web python scripts/seed_demo.py
@@ -184,6 +190,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 
 | Topic | |
 |---|---|
+| **Getting started: install, setup wizard, first week, core concepts** | [docs/getting-started.md](docs/getting-started.md) |
 | Architecture and data model | [docs/architecture.md](docs/architecture.md) |
 | Budget system | [docs/budget.md](docs/budget.md) |
 | Ledger projection engine | [docs/ledger-projections.md](docs/ledger-projections.md) |
