@@ -11,6 +11,9 @@ data:
   # and change the probe paths in deployment.yaml to match.
   APPLICATION_ROOT: "/"
   CC_STATEMENT_DIR: "/app/data/cc_statements"
+  # Time zone for the 17:00 price refresh, the report scheduler and "today".
+  # The image defaults to UTC; uncomment and set yours (applies to web and MCP).
+  # TZ: "America/New_York"
   # Optional LLM endpoints (Ollama-compatible). Leave as-is to disable gracefully.
   OLLAMA_URL: "http://ollama.ollama.svc.cluster.local:11434"
   OLLAMA_MODEL: "granite4.2:3b"

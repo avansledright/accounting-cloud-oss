@@ -3,6 +3,15 @@ FROM python:3.14-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# tzdata so TZ is honoured: the slim image has no zoneinfo database, and
+# without it any TZ other than UTC silently falls back to UTC. The 17:00
+# price refresh, the report scheduler and every date.today() run on local
+# time. Override TZ at runtime (e.g. TZ=America/New_York) for your zone.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+ENV TZ=UTC
+
 WORKDIR /app
 
 COPY requirements.txt .
