@@ -153,7 +153,7 @@ def negative_balance_months(account_id: str = "") -> str:
 
 @mcp.tool()
 def portfolio_summary(account_id: str = "") -> str:
-    """Portfolio totals: market value, dividend estimate, holding count."""
+    """Portfolio totals: live market value, cost basis, gain/loss, YTD dividends, holding count."""
     return get_portfolio_summary(account_id)
 
 @mcp.tool()
@@ -248,7 +248,9 @@ def add_recurring(description: str, amount: float, frequency: str,
                   account_id: str = "", auto_pay: bool = False,
                   payment_method: str = "", notes: str = "") -> str:
     """Add a recurring transaction (bill or paycheck).
-    frequency: 'weekly'|'monthly'|'bi-monthly'|'yearly'.
+    frequency: 'weekly'|'biweekly' (every 14 days)|'monthly'|'bi-monthly'
+    (every OTHER month)|'yearly'. A twice-a-month payday is 'monthly' with
+    day_of_month '15,30'.
     day_of_month: '1' or '1,15' for split-month posting."""
     return W.add_recurring(description, amount, frequency, start_date,
                            transaction_type, category, day_of_month,
@@ -282,7 +284,8 @@ def override_recurring_amount(recurring_id: str, date: str, amount: float) -> st
 def add_transfer(from_account_id: str, to_account_id: str,
                  amount: float, date: str,
                  description: str = "", notes: str = "") -> str:
-    """Record a one-time transfer between accounts."""
+    """Record a one-time transfer between accounts. Also posts the paired
+    'Transfer to:'/'Transfer from:' ledger rows on both accounts, as the web app does."""
     return W.add_transfer(from_account_id, to_account_id, amount, date,
                           description, notes)
 
@@ -359,13 +362,19 @@ def add_debt(name: str, debt_type: str, balance: float,
 
 @mcp.tool()
 def update_debt_balance(debt_id: str, balance: float) -> str:
-    """Set a debt's balance directly."""
+    """Set a debt's STARTING balance (the web app's "Starting Balance").
+    The current balance is this minus linked ledger payments, so don't use
+    this to record a payment — use make_debt_payment."""
     return W.update_debt_balance(debt_id, balance)
 
 @mcp.tool()
-def make_debt_payment(debt_id: str, amount: float) -> str:
-    """Subtract a payment from a debt's balance."""
-    return W.make_debt_payment(debt_id, amount)
+def make_debt_payment(debt_id: str, amount: float, date: str = "",
+                      account_id: str = "", description: str = "") -> str:
+    """Log a payment toward a debt as a ledger expense linked to it (like the
+    web app's log-payment). date: YYYY-MM-DD, default today. Omit account_id
+    for the primary account. description defaults to 'Extra Debt Payment';
+    pass the loan's budget-line description for a regular scheduled payment."""
+    return W.make_debt_payment(debt_id, amount, date, account_id, description)
 
 
 # ============================================================

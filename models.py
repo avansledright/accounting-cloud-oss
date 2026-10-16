@@ -114,6 +114,10 @@ INVESTMENT_ACCOUNT_TYPES = ['ira', 'roth_ira', 'brokerage', '401k', 'hsa', 'defe
 # Account types that hold spendable cash for the ledger/outlook.
 CASH_ACCOUNT_TYPES = ['checking', 'savings']
 
+# Shared by the debt plan's recurring line and logged extra payments (web and
+# MCP), so the outlook dedups a logged payment against that month's projection.
+EXTRA_DEBT_PAYMENT_DESC = 'Extra Debt Payment'
+
 # Debt types
 DEBT_TYPES = [
     ('credit_card', 'Credit Card'),
@@ -652,7 +656,7 @@ class HouseholdEmployee:
                  pay_frequency='monthly', funding_account_id=None,
                  fit_per_period=0, sit_per_period=0,
                  state=None, relationship=None,
-                 lives_with_employer=False, under_18=False,
+                 lives_with_employer=False, under_18=False, under_21=False,
                  notes=None, active=True, _id=None):
         self._id = ObjectId(_id) if _id else ObjectId()
         self.name = name
@@ -669,7 +673,8 @@ class HouseholdEmployee:
         self.state = state  # Overrides global state setting if set
         self.relationship = relationship  # e.g., 'parent', 'in-law', 'unrelated' — affects FICA exemptions
         self.lives_with_employer = lives_with_employer
-        self.under_18 = under_18
+        self.under_18 = under_18  # FICA: under-18 employee whose principal occupation isn't household work
+        self.under_21 = under_21  # FICA + FUTA: your child under 21 (Pub 926)
         self.notes = notes
         self.active = active
 
@@ -691,6 +696,7 @@ class HouseholdEmployee:
             "relationship": self.relationship,
             "lives_with_employer": self.lives_with_employer,
             "under_18": self.under_18,
+            "under_21": self.under_21,
             "notes": self.notes,
             "active": self.active,
         }

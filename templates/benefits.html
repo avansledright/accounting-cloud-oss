@@ -197,7 +197,7 @@
             {% if c.annual_fee %}
             <span class="bn-big {% if c.net >= 0 %}bn-good{% else %}bn-bad{% endif %}">
                 {{ money(c.net) }}</span>
-            <span class="bn-of">net of {{ money(c.annual_fee) }} fee</span>
+            <span class="bn-of">net of {{ money(c.annual_fee) }} fee{% if c.fee_detected %} (from statement){% endif %}</span>
             {% else %}
             <span class="bn-of">No annual fee recorded</span>
             {% endif %}
@@ -372,6 +372,9 @@
             <input type="hidden" name="year" value="{{ year }}">
             <label>Annual fee
                 <input type="number" step="0.01" name="annual_fee" value="{{ c.annual_fee or '' }}"></label>
+            {% if c.fee_detected or c.fee_month_detected %}
+            <small class="muted">Filled in from the latest annual-fee charge on the statements. A value you save here overrides it.</small>
+            {% endif %}
             <label>Fee posts in (anchors the cardmember year)
                 <select name="fee_month">
                     <option value="">—</option>

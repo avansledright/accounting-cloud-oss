@@ -10,7 +10,10 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from agent.db import db
-from models import ACCOUNT_TYPES
+from models import ACCOUNT_TYPES, EXTRA_DEBT_PAYMENT_DESC, Transaction, Transfer
+
+# Same values the web app's budget/transfer forms offer.
+RECURRING_FREQUENCIES = ('weekly', 'biweekly', 'monthly', 'bi-monthly', 'yearly')
 
 
 # ---------- helpers ----------
@@ -40,6 +43,12 @@ def _parse_date(value):
 def _account_exists(account_id):
     oid = _oid(account_id)
     return bool(oid and db.accounts.find_one({'_id': oid}, {'_id': 1}))
+
+
+def _primary_account_id():
+    """The primary account's id as a string, or None — the web app's default."""
+    primary = db.accounts.find_one({'is_primary': True}, {'_id': 1})
+    return str(primary['_id']) if primary else None
 
 
 def _account_name(account_id):
@@ -153,21 +162,24 @@ def add_transaction(description: str, amount: float, date: str,
     if amount <= 0:
         return "Error: amount must be positive."
 
-    acct_oid = _oid(account_id) if account_id else None
-    if account_id and not acct_oid:
-        return "Error: invalid account_id."
-    if acct_oid and not _account_exists(account_id):
-        return "Error: account not found."
+    if account_id:
+        if not _oid(account_id):
+            return "Error: invalid account_id."
+        if not _account_exists(account_id):
+            return "Error: account not found."
+    else:
+        # Same default as the web app's POST /transactions
+        account_id = _primary_account_id()
 
-    doc = {
-        'description': description,
-        'amount': float(amount),
-        'date': dt,
-        'transaction_type': transaction_type,
-        'account_id': acct_oid,
-    }
-    res = db.transactions.insert_one(doc)
-    return f"Added transaction {res.inserted_id}: {transaction_type} ${amount:,.2f} — {description}"
+    txn = Transaction(
+        description=description,
+        amount=float(amount),
+        date=dt,
+        transaction_type=transaction_type,
+        account_id=account_id,
+    )
+    db.transactions.insert_one(txn.__dict__)
+    return f"Added transaction {txn._id}: {transaction_type} ${amount:,.2f} — {description}"
 
 
 def update_transaction(transaction_id: str, description: str = "",
@@ -205,8 +217,19 @@ def delete_transaction(transaction_id: str) -> str:
     oid = _oid(transaction_id)
     if not oid:
         return "Error: invalid transaction_id."
-    res = db.transactions.delete_one({'_id': oid})
-    return "Deleted." if res.deleted_count else "Transaction not found."
+    transaction = db.transactions.find_one({'_id': oid})
+    if not transaction:
+        return "Transaction not found."
+    # Like the web app's delete: record a skip so the projected occurrence
+    # this transaction stood in for doesn't reappear in the outlook.
+    transaction_date = transaction['date'].strftime('%Y-%m-%d') if isinstance(transaction['date'], datetime) else transaction['date']
+    db.skipped_transactions.update_one(
+        {'description': transaction['description'], 'date': transaction_date},
+        {'$set': {'description': transaction['description'], 'date': transaction_date}},
+        upsert=True
+    )
+    db.transactions.delete_one({'_id': oid})
+    return "Deleted."
 
 
 # ---------- recurring transactions ----------
@@ -218,12 +241,13 @@ def add_recurring(description: str, amount: float, frequency: str,
                   payment_method: str = "", notes: str = "") -> str:
     """Add a recurring transaction (a bill or a paycheck).
 
-    frequency: 'weekly' | 'monthly' | 'bi-monthly' | 'yearly'
+    frequency: 'weekly' | 'biweekly' (every 14 days) | 'monthly' |
+               'bi-monthly' (every other month) | 'yearly'
     day_of_month: '1' or '1,15' for split months.
     """
     if transaction_type not in ('income', 'expense'):
         return "Error: transaction_type must be 'income' or 'expense'."
-    if frequency not in ('weekly', 'monthly', 'bi-monthly', 'yearly'):
+    if frequency not in RECURRING_FREQUENCIES:
         return "Error: bad frequency."
     sd = _parse_date(start_date)
     if not sd:
@@ -262,7 +286,7 @@ def update_recurring(recurring_id: str, description: str = "",
     if description: update['description'] = description
     if amount: update['amount'] = float(amount)
     if frequency:
-        if frequency not in ('weekly', 'monthly', 'bi-monthly', 'yearly'):
+        if frequency not in RECURRING_FREQUENCIES:
             return "Error: bad frequency."
         update['frequency'] = frequency
     if category: update['category'] = category
@@ -294,9 +318,11 @@ def override_recurring_amount(recurring_id: str, date: str, amount: float) -> st
     dt = _parse_date(date)
     if not dt:
         return "Error: bad date."
+    # The outlook keys overrides on the 'YYYY-MM-DD' string, as the web app stores it.
+    date_str = dt.strftime('%Y-%m-%d')
     db.projected_overrides.update_one(
-        {'recurring_id': oid, 'date': dt},
-        {'$set': {'amount': float(amount)}},
+        {'recurring_id': oid, 'date': date_str},
+        {'$set': {'recurring_id': oid, 'date': date_str, 'amount': float(amount)}},
         upsert=True,
     )
     return f"Override saved: {date} → ${amount:,.2f}"
@@ -313,17 +339,31 @@ def add_transfer(from_account_id: str, to_account_id: str,
         return "Error: invalid account ids."
     if not _account_exists(from_account_id) or not _account_exists(to_account_id):
         return "Error: account not found."
+    if fr == to:
+        return "Error: can't transfer to the same account."
+    if amount <= 0:
+        return "Error: amount must be positive."
     dt = _parse_date(date)
     if not dt:
         return "Error: bad date."
-    doc = {
-        'from_account_id': fr, 'to_account_id': to,
-        'amount': float(amount), 'date': dt,
-        'description': description or 'Account Transfer',
-        'notes': notes or None,
-    }
-    res = db.transfers.insert_one(doc)
-    return f"Transfer {res.inserted_id}: ${amount:,.2f} {_account_name(from_account_id)} → {_account_name(to_account_id)}"
+    # Mirrors the web app's POST /transfers/add: the transfer record plus a
+    # paired expense/income on the ledger, which is what moves the balances.
+    description = description or 'Account Transfer'
+    transfer = Transfer(
+        from_account_id=from_account_id, to_account_id=to_account_id,
+        amount=float(amount), date=dt,
+        description=description, notes=notes or None,
+    )
+    db.transfers.insert_one(transfer.__dict__)
+    db.transactions.insert_one(Transaction(
+        description=f"Transfer to: {description}", amount=float(amount), date=dt,
+        transaction_type='expense', account_id=from_account_id,
+    ).__dict__)
+    db.transactions.insert_one(Transaction(
+        description=f"Transfer from: {description}", amount=float(amount), date=dt,
+        transaction_type='income', account_id=to_account_id,
+    ).__dict__)
+    return f"Transfer {transfer._id}: ${amount:,.2f} {_account_name(from_account_id)} → {_account_name(to_account_id)}"
 
 
 def add_recurring_transfer(from_account_id: str, to_account_id: str,
@@ -336,7 +376,7 @@ def add_recurring_transfer(from_account_id: str, to_account_id: str,
     sd = _parse_date(start_date)
     if not sd:
         return "Error: bad start_date."
-    if frequency not in ('weekly', 'monthly', 'bi-monthly', 'yearly'):
+    if frequency not in RECURRING_FREQUENCIES:
         return "Error: bad frequency."
     doc = {
         'from_account_id': fr, 'to_account_id': to,
@@ -472,24 +512,64 @@ def add_debt(name: str, debt_type: str, balance: float,
 
 
 def update_debt_balance(debt_id: str, balance: float) -> str:
+    """Set a debt's STARTING balance — the web app's edit-debt "Starting Balance" field.
+
+    The current balance is derived: linked ledger payments are amortized
+    against this figure. To record a payment, use make_debt_payment instead.
+    """
     oid = _oid(debt_id)
     if not oid:
         return "Error: invalid debt_id."
     res = db.debts.update_one({'_id': oid}, {'$set': {'balance': float(balance)}})
-    return f"Balance updated to ${balance:,.2f}." if res.matched_count else "Debt not found."
+    if not res.matched_count:
+        return "Debt not found."
+    return (f"Starting balance set to ${balance:,.2f}. Linked payments are "
+            f"subtracted from this to give the current balance.")
 
 
-def make_debt_payment(debt_id: str, amount: float) -> str:
-    """Subtract a payment from a debt's balance. Convenience over update_debt_balance."""
+def make_debt_payment(debt_id: str, amount: float, date: str = "",
+                      account_id: str = "", description: str = "") -> str:
+    """Log a payment toward a debt, the way the web app's "log payment" does.
+
+    Posts an expense on the ledger (default: primary account, today) linked
+    to the debt via debt_id. The debt's starting balance is left alone; its
+    current balance drops because linked payments are amortized against it.
+    description defaults to the payoff plan's 'Extra Debt Payment' line (so
+    the outlook dedups that month's projected extra); pass the loan's regular
+    budget-line description for a scheduled payment instead.
+    """
     oid = _oid(debt_id)
     if not oid:
         return "Error: invalid debt_id."
+    if amount <= 0:
+        return "Error: amount must be positive."
     d = db.debts.find_one({'_id': oid})
     if not d:
         return "Debt not found."
-    new_bal = max(0, (d.get('balance', 0) or 0) - float(amount))
-    db.debts.update_one({'_id': oid}, {'$set': {'balance': new_bal}})
-    return f"Paid ${amount:,.2f} on {d['name']}. New balance: ${new_bal:,.2f}"
+    if date:
+        dt = _parse_date(date)
+        if not dt:
+            return "Error: date must be YYYY-MM-DD."
+    else:
+        dt = datetime.combine(datetime.now().date(), datetime.min.time())
+    if account_id:
+        if not _account_exists(account_id):
+            return "Error: invalid account_id."
+    else:
+        account_id = _primary_account_id()
+
+    txn = Transaction(
+        description=description or EXTRA_DEBT_PAYMENT_DESC,
+        amount=round(float(amount), 2),
+        date=dt,
+        transaction_type='expense',
+        account_id=account_id,
+    )
+    doc = txn.__dict__
+    doc['debt_id'] = oid
+    db.transactions.insert_one(doc)
+    return (f"Logged ${amount:,.2f} payment on {d['name']} as ledger transaction "
+            f"{txn._id} ({dt:%Y-%m-%d}, {_account_name(account_id) or 'no account'}).")
 
 
 # ---------- budget targets ----------

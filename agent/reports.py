@@ -14,7 +14,7 @@ from agent.tools.budget import get_budget_status, get_recurring_items
 from agent.tools.cashflow import get_cash_flow_outlook, get_negative_balance_months
 from agent.tools.portfolio import (
     get_portfolio_summary, get_holdings, get_ytd_dividends,
-    get_dividend_history,
+    get_dividend_history, fetch_live_price,
 )
 from agent.tools.networth import get_current_net_worth, get_net_worth_history
 from agent.tools.debts import get_debts
@@ -119,29 +119,8 @@ def generate_weekly_report() -> dict:
     return report
 
 
-def _fetch_yahoo_price(symbol: str) -> float | None:
-    """Lightweight live-price fetch for the portfolio report.
-
-    Mirrors the main app's Yahoo call but kept in-module to avoid an
-    import cycle with app.py. We only need the current price here — the
-    full app-side fetch_yahoo also pulls dividend history, which we
-    don't need for the prompt.
-    """
-    try:
-        resp = requests.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
-            "?range=1d&interval=1d",
-            headers={'User-Agent': 'Mozilla/5.0'},
-            timeout=8,
-        )
-        resp.raise_for_status()
-        result = resp.json().get('chart', {}).get('result') or []
-        if not result:
-            return None
-        return result[0].get('meta', {}).get('regularMarketPrice')
-    except Exception:
-        logger.warning("Live price fetch failed for %s", symbol, exc_info=True)
-        return None
+# Live price for the portfolio report; shared with the portfolio_summary tool.
+_fetch_yahoo_price = fetch_live_price
 
 
 def _build_portfolio_data() -> dict:

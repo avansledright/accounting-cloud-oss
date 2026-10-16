@@ -3,6 +3,14 @@ from datetime import datetime, date, timedelta
 
 from dateutil.relativedelta import relativedelta
 from agent.db import db
+from recurrence import occurrence_dates, to_date
+
+
+def _active_in(item, month_start, month_end):
+    """Started by month end and not ended before month start (as the web outlook)."""
+    if to_date(item['start_date']) > month_end:
+        return False
+    return not (item.get('end_date') and to_date(item['end_date']) < month_start)
 
 
 def _generate_outlook(account_filter=None):
@@ -13,12 +21,14 @@ def _generate_outlook(account_filter=None):
     primary_account = db.accounts.find_one({'is_primary': True})
     primary_account_id = str(primary_account['_id']) if primary_account else None
 
+    # Default to the primary account, like the web ledger
+    if not account_filter:
+        account_filter = primary_account_id
+
     # Determine start balance
     if account_filter:
         acct = db.accounts.find_one({'_id': __import__('bson').ObjectId(account_filter)})
         start_balance = acct.get('balance', 0) if acct else 0
-    elif primary_account:
-        start_balance = primary_account.get('balance', 0)
     else:
         start_balance = 0
 
@@ -42,40 +52,18 @@ def _generate_outlook(account_filter=None):
 
         # Recurring transactions
         for rt in recurring:
-            rt_start = rt['start_date']
-            if isinstance(rt_start, datetime):
-                rt_start = rt_start.date()
-            if rt_start > month_end:
+            if not _active_in(rt, month_start, month_end):
                 continue
-            if rt.get('end_date'):
-                rt_end = rt['end_date']
-                if isinstance(rt_end, datetime):
-                    rt_end = rt_end.date()
-                if rt_end < month_start:
-                    continue
 
-            # Account filter
-            rt_acct = str(rt.get('account_id', '')) or primary_account_id
+            # Account filter (no account_id means the primary account)
+            rt_acct = str(rt['account_id']) if rt.get('account_id') else primary_account_id
             if account_filter and rt_acct != account_filter:
                 continue
 
+            # Same occurrence dates the web ledger projects (weekly, biweekly,
+            # split-day monthly, every-other-month bi-monthly, yearly)
+            occurrences = len(occurrence_dates(rt, month_start, month_end))
             amount = rt.get('amount', 0)
-            freq = rt.get('frequency', 'monthly')
-            if freq == 'weekly':
-                occurrences = 4
-            elif freq == 'bi-monthly':
-                occurrences = 2
-            elif freq == 'yearly':
-                if month_date.month == rt_start.month:
-                    occurrences = 1
-                else:
-                    occurrences = 0
-            elif freq == 'monthly':
-                # day_of_month may list several days, e.g. "1,15" for a semi-monthly payday
-                occurrences = len([d for d in str(rt.get('day_of_month') or '').split(',') if d.strip()]) or 1
-            else:
-                occurrences = 1
-
             if rt.get('transaction_type') == 'income':
                 income += amount * occurrences
             else:
@@ -83,14 +71,17 @@ def _generate_outlook(account_filter=None):
 
         # Recurring transfers (affect source and destination)
         for xfer in recurring_xfers:
-            amount = xfer.get('amount', 0)
+            if not account_filter or not _active_in(xfer, month_start, month_end):
+                continue
             from_id = str(xfer.get('from_account_id', ''))
             to_id = str(xfer.get('to_account_id', ''))
-            if account_filter:
-                if account_filter == from_id:
-                    expenses += amount
-                elif account_filter == to_id:
-                    income += amount
+            if account_filter not in (from_id, to_id):
+                continue
+            moved = xfer.get('amount', 0) * len(occurrence_dates(xfer, month_start, month_end))
+            if account_filter == from_id:
+                expenses += moved
+            else:
+                income += moved
 
         net = income - expenses
         running_balance += net

@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from agent.db import db
+from recurrence import calc_monthly_amount
 
 
 def get_budget_status(month: str = "") -> str:
@@ -80,18 +81,8 @@ def get_recurring_items(item_type: str = "") -> str:
             for rt in items:
                 amount = rt.get('amount', 0)
                 freq = rt.get('frequency', 'monthly')
-                # Calculate monthly equivalent
-                if freq == 'weekly':
-                    monthly = amount * 52 / 12
-                elif freq == 'bi-monthly':
-                    monthly = amount * 2
-                elif freq == 'yearly':
-                    monthly = amount / 12
-                elif freq == 'monthly':
-                    # day_of_month may list several days, e.g. "1,15" for a semi-monthly payday
-                    monthly = amount * (len([d for d in str(rt.get('day_of_month') or '').split(',') if d.strip()]) or 1)
-                else:
-                    monthly = amount
+                # Monthly equivalent, exactly as the web app's budget page computes it
+                monthly = calc_monthly_amount(amount, freq, rt.get('day_of_month'))
                 ttype = rt.get('transaction_type', 'expense')
                 cat = rt.get('category', '')
                 cat_str = f" [{cat}]" if cat else ""
@@ -112,14 +103,7 @@ def get_recurring_items(item_type: str = "") -> str:
                 freq = rt.get('frequency', 'monthly')
                 from_name = accts.get(str(rt.get('from_account_id', '')), 'Unknown')
                 to_name = accts.get(str(rt.get('to_account_id', '')), 'Unknown')
-                if freq == 'weekly':
-                    monthly = amount * 52 / 12
-                elif freq == 'bi-monthly':
-                    monthly = amount * 2
-                elif freq == 'yearly':
-                    monthly = amount / 12
-                else:
-                    monthly = amount
+                monthly = calc_monthly_amount(amount, freq, rt.get('day_of_month'))
                 lines.append(
                     f"  {rt.get('description', 'Transfer')}: ${amount:,.2f}/{freq} "
                     f"(~${monthly:,.2f}/mo) — {from_name} → {to_name}"

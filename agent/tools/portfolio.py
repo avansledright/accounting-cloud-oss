@@ -1,12 +1,40 @@
+import logging
 from datetime import datetime
 
+import requests
 from bson import ObjectId
 
 from agent.db import db
 
+logger = logging.getLogger(__name__)
+
+
+def fetch_live_price(symbol: str) -> float | None:
+    """Lightweight live-price fetch (Yahoo, the web app's primary source).
+
+    Mirrors the main app's Yahoo call but kept here to avoid importing
+    app.py into the MCP server. Only the current price is needed — the
+    app-side fetch_yahoo also pulls dividend history.
+    """
+    try:
+        resp = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+            "?range=1d&interval=1d",
+            headers={'User-Agent': 'Mozilla/5.0'},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        result = resp.json().get('chart', {}).get('result') or []
+        if not result:
+            return None
+        return result[0].get('meta', {}).get('regularMarketPrice')
+    except Exception:
+        logger.warning("Live price fetch failed for %s", symbol, exc_info=True)
+        return None
+
 
 def get_portfolio_summary(account_id: str = "") -> str:
-    """Get portfolio summary: total holdings value, annual dividend estimate, and holding count.
+    """Get portfolio summary: live market value, cost basis, gain/loss, YTD dividends, holding count.
 
     Args:
         account_id: Filter to a specific investment account. Leave empty for all.
@@ -22,14 +50,20 @@ def get_portfolio_summary(account_id: str = "") -> str:
     # Build account lookup
     accts = {str(a['_id']): a['name'] for a in db.accounts.find({}, {'name': 1})}
 
-    total_value = 0.0
-    total_cost = 0.0
     count = len(holdings)
+    symbols = sorted({(h.get('symbol') or '').upper() for h in holdings if h.get('symbol')})
+    prices = {sym: fetch_live_price(sym) for sym in symbols}
 
-    for h in holdings:
-        qty = h.get('quantity', 0)
-        cost = h.get('cost_basis', 0) or 0
-        total_cost += cost
+    def _value(h):
+        price = prices.get((h.get('symbol') or '').upper())
+        return price * (h.get('quantity', 0) or 0) if price is not None else None
+
+    total_cost = sum(h.get('cost_basis', 0) or 0 for h in holdings)
+    priced = [h for h in holdings if _value(h) is not None]
+    unpriced = count - len(priced)
+    total_value = sum(_value(h) for h in priced)
+    # Gain only over holdings we could price, so a missing quote isn't a "loss"
+    priced_cost = sum(h.get('cost_basis', 0) or 0 for h in priced)
 
     # Get YTD dividends
     year_start = datetime(datetime.now().year, 1, 1)
@@ -39,11 +73,17 @@ def get_portfolio_summary(account_id: str = "") -> str:
         div_query['holding_id'] = {'$in': holding_ids}
     ytd_divs = sum(d.get('amount', 0) for d in db.dividends.find(div_query))
 
-    lines = [
-        f"Portfolio summary ({count} holdings):",
-        f"  Total cost basis: ${total_cost:,.2f}",
-        f"  YTD dividends: ${ytd_divs:,.2f}",
-    ]
+    lines = [f"Portfolio summary ({count} holdings):"]
+    if priced:
+        note = f" ({unpriced} holding(s) without a live price excluded)" if unpriced else ""
+        lines.append(f"  Market value (live): ${total_value:,.2f}{note}")
+    else:
+        lines.append("  Market value: unavailable (no live prices)")
+    lines.append(f"  Total cost basis: ${total_cost:,.2f}")
+    if priced and priced_cost > 0:
+        gain = total_value - priced_cost
+        lines.append(f"  Unrealized gain/loss: ${gain:+,.2f} ({gain / priced_cost * 100:+.1f}%)")
+    lines.append(f"  YTD dividends: ${ytd_divs:,.2f}")
 
     # Group by account
     by_account = {}
@@ -58,7 +98,9 @@ def get_portfolio_summary(account_id: str = "") -> str:
         for aid, acct_holdings in by_account.items():
             name = accts.get(aid, 'Unknown')
             acct_cost = sum(h.get('cost_basis', 0) or 0 for h in acct_holdings)
-            lines.append(f"  {name}: {len(acct_holdings)} holdings, ${acct_cost:,.2f} cost basis")
+            acct_values = [_value(h) for h in acct_holdings if _value(h) is not None]
+            value_str = f"${sum(acct_values):,.2f} market value, " if acct_values else ""
+            lines.append(f"  {name}: {len(acct_holdings)} holdings, {value_str}${acct_cost:,.2f} cost basis")
 
     return "\n".join(lines)
 

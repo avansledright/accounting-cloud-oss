@@ -16,6 +16,7 @@ dicts. Route wiring and persistence live in app.py.
 
 from datetime import datetime, timedelta
 import calendar as _calendar
+import re
 
 # ---------------------------------------------------------------------------
 # IRS limits
@@ -489,21 +490,54 @@ def detect_perk_usage(card, transactions, year, today=None):
     return capped
 
 
+# "ANNUAL FEE" (Citi) and "ANNUAL MEMBERSHIP FEE" (Amex, Chase) statement lines.
+ANNUAL_FEE_PATTERN = re.compile(r'\bANNUAL\s+(?:MEMBERSHIP\s+)?FEE\b')
+
+
+def detect_annual_fee(card, transactions):
+    """(fee, month) from the most recent annual-fee charge on this card.
+
+    The fee charge is the authoritative record of what the card costs and
+    when the cardmember year turns over, so the page reads it rather than
+    asking. Returns (None, None) if no fee charge is found. Callers only use
+    this where the card has no value of its own — a hand-entered fee or
+    month always wins.
+    """
+    latest = None
+    for t in transactions:
+        if t.get('card_name') != card.get('name'):
+            continue
+        try:
+            amount = float(t.get('amount') or 0)
+        except (TypeError, ValueError):
+            continue
+        # Charges only; a fee reversal is a negative credit line.
+        if amount <= 0 or not ANNUAL_FEE_PATTERN.search((t.get('description') or '').upper()):
+            continue
+        when = _as_datetime(t.get('date'))
+        if when and (latest is None or when > latest[0]):
+            latest = (when, amount)
+    if not latest:
+        return None, None
+    return latest[1], latest[0].month
+
+
 def suggest_template(card):
     """Best-guess template key for a card, matched on its name and issuer.
 
     A card with no credits yet is useless, and the templates only apply when
     someone explicitly loads one — so the page offers the likely match inline
-    rather than leaving an empty card and a buried menu. Matching is
-    deliberately loose because cards get named things like "Citi" or
-    "Chase Sapphire".
+    rather than leaving an empty card and a buried menu. Like the others, the
+    Citi template keys on the product name, not the issuer: every Citi card
+    carries issuer 'citi', and a Double Cash, Custom Cash or Premier must not
+    be offered the AAdvantage Executive's $695 fee and credits.
     """
     text = f"{card.get('name') or ''} {card.get('issuer') or ''}".lower()
     if 'platinum' in text and ('amex' in text or 'american express' in text):
         return 'amex_platinum'
     if 'sapphire' in text:
         return 'chase_sapphire_preferred'
-    if 'aadvantage' in text or 'executive' in text or 'citi' in text:
+    if 'aadvantage' in text or 'american airlines' in text or ('executive' in text and 'citi' in text):
         return 'citi_aadvantage_executive'
     return None
 
@@ -669,15 +703,20 @@ def period_label(cadence, key):
     return key
 
 
-def build_card_perks(cards, usage_docs, year, today=None, transactions=None):
+def build_card_perks(cards, usage_docs, year, today=None, transactions=None,
+                     fee_transactions=None):
     """Per-card perk utilization, forfeited value, and annual-fee break-even.
 
-    usage_docs   — cc_perk_usage docs: {card_id, perk_id, period, amount_used}
-    transactions — cc_transactions for the year, used to infer usage from
-                   qualifying charges where no manual entry exists.
+    usage_docs       — cc_perk_usage docs: {card_id, perk_id, period, amount_used}
+    transactions     — cc_transactions for the year, used to infer usage from
+                       qualifying charges where no manual entry exists.
+    fee_transactions — annual-fee charges from any year (the latest fee may
+                       predate this year); defaults to `transactions`.
     """
     today = today or datetime.now()
     transactions = transactions or []
+    if fee_transactions is None:
+        fee_transactions = transactions
     used = {}
     for u in usage_docs:
         used[(str(u.get('card_id')), u.get('perk_id'), u.get('period'))] = float(u.get('amount_used') or 0)
@@ -689,6 +728,19 @@ def build_card_perks(cards, usage_docs, year, today=None, transactions=None):
             annual_fee = float(card.get('annual_fee') or 0)
         except (TypeError, ValueError):
             annual_fee = 0.0
+
+        # Fill a missing fee / fee month from the statement's fee charge. Only
+        # in memory: a value the user entered is never replaced or written.
+        fee_detected = month_detected = False
+        if not annual_fee or not card.get('fee_month'):
+            found_fee, found_month = detect_annual_fee(card, fee_transactions)
+            card = dict(card)
+            if found_fee and not annual_fee:
+                annual_fee = card['annual_fee'] = found_fee
+                fee_detected = True
+            if found_month and not card.get('fee_month'):
+                card['fee_month'] = found_month
+                month_detected = True
 
         # The cardmember year is anchored to the month the annual fee posts.
         try:
@@ -783,6 +835,8 @@ def build_card_perks(cards, usage_docs, year, today=None, transactions=None):
             'card_id': cid,
             'annual_fee': annual_fee,
             'fee_month': card.get('fee_month'),
+            'fee_detected': fee_detected,
+            'fee_month_detected': month_detected,
             'perks': perks,
             # Reference only — intentionally absent from every figure below.
             'benefits': card_benefits,

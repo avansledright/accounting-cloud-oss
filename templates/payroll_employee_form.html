@@ -95,14 +95,18 @@
             </div>
         </div>
 
-        <h2>FICA Exemption Flags</h2>
-        <p class="muted">FICA (Social Security + Medicare) rules have exemptions for certain household employees. Check only if applicable — see IRS Pub 926.</p>
+        <h2>FICA / FUTA Exemption Flags</h2>
+        <p class="muted">FICA (Social Security + Medicare) and FUTA have exemptions for certain household employees: your child under 21 (FICA and FUTA), your parent, and an employee under 18 whose principal occupation isn't household work (FICA only). Check only if applicable — see IRS Pub 926.</p>
         <div class="form-row">
             <div class="form-group">
                 <label><input type="checkbox" name="lives_with_employer" {% if employee and employee.lives_with_employer %}checked{% endif %}> Lives with employer</label>
             </div>
             <div class="form-group">
                 <label><input type="checkbox" name="under_18" {% if employee and employee.under_18 %}checked{% endif %}> Under age 18</label>
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" name="under_21" {% if employee and employee.under_21 %}checked{% endif %}> Under age 21</label>
+                <small class="muted">With relationship "child", exempts wages from FICA and FUTA.</small>
             </div>
         </div>
 

@@ -16,12 +16,13 @@ from dateutil.relativedelta import relativedelta
 import calendar
 import home_move
 import benefits
+from recurrence import calc_monthly_amount, occurrence_dates
 from models import (Transaction, RecurringTransaction, Account, Asset, SavingsGoal, NetWorthSnapshot, ProjectedOverride, Transfer, Debt, RecurringTransfer,
                     Holding, Dividend, HouseholdEmployee, PayrollEntry, PaymentPlan,
                     CATEGORIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES, ACCOUNT_TYPES, INVESTMENT_ACCOUNT_TYPES, CASH_ACCOUNT_TYPES, ASSET_TYPES, LIABILITY_TYPES, GOAL_CATEGORIES, GOAL_TYPES,
                     LIVE_GOAL_TYPES, SAVINGS_GOAL_TYPES, DEBT_TYPES,
                     CARD_ISSUERS, CC_CATEGORIES, CHASE_CATEGORY_MAP, MERCHANT_CATEGORY_RULES, MERCHANT_OVERRIDES, PAYMENT_KEYWORDS, CREDIT_KEYWORDS,
-                    SUBSCRIPTION_GROUPS, PAYROLL_DEFAULTS, PAY_FREQUENCIES)
+                    SUBSCRIPTION_GROUPS, PAYROLL_DEFAULTS, PAY_FREQUENCIES, EXTRA_DEBT_PAYMENT_DESC)
 from bson import ObjectId
 from bson.errors import InvalidId
 from bson.json_util import dumps, loads
@@ -483,22 +484,6 @@ def derive_account_return_rate(account_id_str):
     return None
 
 
-def calc_monthly_amount(amount, frequency, day_of_month):
-    """Calculate monthly amount from a recurring transaction's frequency and day(s)."""
-    days_count = len(str(day_of_month or '1').split(',')) if day_of_month else 1
-    if frequency == 'weekly':
-        return amount * 52 / 12
-    elif frequency == 'biweekly':
-        return amount * 26 / 12
-    elif frequency == 'monthly':
-        return amount * days_count
-    elif frequency == 'bi-monthly':
-        return (amount * days_count) / 2
-    elif frequency == 'yearly':
-        return (amount * days_count) / 12
-    else:
-        return amount * days_count
-
 def calculate_investment_projection(account, months=120):
     """
     Project investment account value over time.
@@ -706,7 +691,11 @@ def calculate_yearly_outlook(start_balance=0.0, account_filter=None, max_months_
     overrides = {}
     if not budget_only:
         for override in db.projected_overrides.find():
-            key = (str(override['recurring_id']), override['date'])
+            # Stored as a 'YYYY-MM-DD' string; older MCP writes used a datetime.
+            o_date = override['date']
+            if isinstance(o_date, (datetime, date)):
+                o_date = o_date.strftime('%Y-%m-%d')
+            key = (str(override['recurring_id']), o_date)
             overrides[key] = override['amount']
 
     # Calculate month range (anchored on `anchor`, normally today)
@@ -803,54 +792,8 @@ def calculate_yearly_outlook(start_balance=0.0, account_filter=None, max_months_
             if rt_start_date > month_end or (rt.get('end_date') and (rt.get('end_date').date() if isinstance(rt.get('end_date'), datetime) else datetime.fromisoformat(rt.get('end_date')).date()) < month_start):
                 continue
 
-            # Determine which dates this recurring item falls on within the month
-            projected_dates = []
-            if rt['frequency'] == 'weekly':
-                # Generate all occurrences of the same weekday within the month
-                start_weekday = rt_start_date.weekday()
-                d = month_start
-                while d <= month_end:
-                    if d.weekday() == start_weekday and d >= rt_start_date:
-                        projected_dates.append(d)
-                    d += timedelta(days=1)
-            elif rt['frequency'] == 'biweekly':
-                # Every 14 days anchored on start_date
-                d = rt_start_date
-                if d < month_start:
-                    d += timedelta(days=((month_start - d).days + 13) // 14 * 14)
-                while d <= month_end:
-                    projected_dates.append(d)
-                    d += timedelta(days=14)
-            else:
-                apply_transaction = False
-                if rt['frequency'] == 'monthly':
-                    apply_transaction = True
-                elif rt['frequency'] == 'yearly':
-                    if rt_start_date.month == month_date.month:
-                        apply_transaction = True
-                elif rt['frequency'] == 'bi-monthly':
-                    month_diff = (month_date.year - rt_start_date.year) * 12 + (month_date.month - rt_start_date.month)
-                    if month_diff >= 0 and month_diff % 2 == 0:
-                        apply_transaction = True
-
-                if apply_transaction:
-                    days_of_month = []
-                    if rt.get('day_of_month'):
-                        for day_str in str(rt['day_of_month']).split(','):
-                            try:
-                                day = int(day_str.strip())
-                                max_day = calendar.monthrange(month_date.year, month_date.month)[1]
-                                day = min(day, max_day)
-                                days_of_month.append(day)
-                            except ValueError:
-                                pass
-                    if not days_of_month:
-                        days_of_month = [1]
-                    for day in days_of_month:
-                        projected_dates.append(date(month_date.year, month_date.month, day))
-
-            # Filter out dates before the start date
-            projected_dates = [d for d in projected_dates if d >= rt_start_date]
+            # Dates this recurring item falls on within the month (on/after start_date)
+            projected_dates = occurrence_dates(rt, month_start, month_end)
 
             if not projected_dates:
                 continue
@@ -909,53 +852,8 @@ def calculate_yearly_outlook(start_balance=0.0, account_filter=None, max_months_
             if rt_start_date > month_end or (rt.get('end_date') and (rt.get('end_date').date() if isinstance(rt.get('end_date'), datetime) else datetime.fromisoformat(rt.get('end_date')).date()) < month_start):
                 continue
 
-            # Determine which dates this recurring transfer falls on within the month
-            projected_dates = []
-            if rt['frequency'] == 'weekly':
-                start_weekday = rt_start_date.weekday()
-                d = month_start
-                while d <= month_end:
-                    if d.weekday() == start_weekday and d >= rt_start_date:
-                        projected_dates.append(d)
-                    d += timedelta(days=1)
-            elif rt['frequency'] == 'biweekly':
-                # Every 14 days anchored on start_date
-                d = rt_start_date
-                if d < month_start:
-                    d += timedelta(days=((month_start - d).days + 13) // 14 * 14)
-                while d <= month_end:
-                    projected_dates.append(d)
-                    d += timedelta(days=14)
-            else:
-                apply_transaction = False
-                if rt['frequency'] == 'monthly':
-                    apply_transaction = True
-                elif rt['frequency'] == 'yearly':
-                    if rt_start_date.month == month_date.month:
-                        apply_transaction = True
-                elif rt['frequency'] == 'bi-monthly':
-                    month_diff = (month_date.year - rt_start_date.year) * 12 + (month_date.month - rt_start_date.month)
-                    if month_diff >= 0 and month_diff % 2 == 0:
-                        apply_transaction = True
-
-                if apply_transaction:
-                    days_of_month = []
-                    if rt.get('day_of_month'):
-                        for day_str in str(rt['day_of_month']).split(','):
-                            try:
-                                day = int(day_str.strip())
-                                max_day = calendar.monthrange(month_date.year, month_date.month)[1]
-                                day = min(day, max_day)
-                                days_of_month.append(day)
-                            except ValueError:
-                                pass
-                    if not days_of_month:
-                        days_of_month = [1]
-                    for day in days_of_month:
-                        projected_dates.append(date(month_date.year, month_date.month, day))
-
-            # Filter out dates before the start date
-            projected_dates = [d for d in projected_dates if d >= rt_start_date]
+            # Dates this recurring transfer falls on within the month (on/after start_date)
+            projected_dates = occurrence_dates(rt, month_start, month_end)
 
             if not projected_dates:
                 continue
@@ -2127,15 +2025,9 @@ def history_page():
     current_month = today.month
 
     # History shows January through 2 months ago (months before the previous month)
-    # For March: history = January only. For April: Jan + Feb. For Jan/Feb: nothing.
+    # For March: history = January only. For April: Jan + Feb. For Jan/Feb: nothing
+    # in the current year (past years are still browsable via ?year=).
     months_to_show = current_month - 2  # e.g., March (3) -> 1 month (January)
-    if months_to_show <= 0:
-        return render_template('history.html',
-                               monthly_data=[],
-                               accounts_for_filter=[],
-                               account_filter='all',
-                               primary_account_id=None,
-                               year=today.year)
 
     # Get all accounts for filter dropdown
     all_accounts = list(db.accounts.find())
@@ -2164,7 +2056,7 @@ def history_page():
     # For past years, show all 12 months; for current year, show up to 2 months ago
     if year < today.year:
         months_to_show = 12
-    elif year > today.year:
+    elif year > today.year or months_to_show <= 0:
         return render_template('history.html',
                                monthly_data=[],
                                accounts_for_filter=accounts_for_filter,
@@ -3008,7 +2900,12 @@ def account_detail(account_id):
     projection = None
     if is_investment and account.get('estimated_return_rate'):
         # Default 10 years; ?horizon=<months> allows longer projections
-        horizon = int(request.args.get('horizon', 120))
+        try:
+            horizon = int(request.args.get('horizon', 120))
+        except (TypeError, ValueError):
+            horizon = 120
+        if not 1 <= horizon <= 600:
+            horizon = 120
         projection = calculate_investment_projection(account, months=horizon)
 
     # Get recurring items for this account
@@ -3486,17 +3383,20 @@ def delete_transfer(transfer_id):
     transfer = db.transfers.find_one({'_id': safe_objectid(transfer_id)})
     if transfer:
         # Delete the linked ledger transactions
+        # The Transaction model stores account_id as an ObjectId; match the
+        # string form too in case an older row was written that way.
         description = transfer.get('description', 'Account Transfer')
         transfer_date = transfer['date']
+        from_id, to_id = transfer['from_account_id'], transfer['to_account_id']
         db.transactions.delete_one({
             'description': f"Transfer to: {description}",
             'date': transfer_date,
-            'account_id': str(transfer['from_account_id'])
+            'account_id': {'$in': [from_id, str(from_id)]}
         })
         db.transactions.delete_one({
             'description': f"Transfer from: {description}",
             'date': transfer_date,
-            'account_id': str(transfer['to_account_id'])
+            'account_id': {'$in': [to_id, str(to_id)]}
         })
         db.transfers.delete_one({'_id': safe_objectid(transfer_id)})
 
@@ -4807,7 +4707,7 @@ def debt_payoff_schedule(debt_id):
 # aware strategy: it picks the target debt, reserves the extra payment as a
 # recurring budget line, and logs real payments to the ledger on demand.
 
-EXTRA_DEBT_PAYMENT_DESC = 'Extra Debt Payment'  # shared by the recurring line and logged payments (so the outlook dedups them)
+# EXTRA_DEBT_PAYMENT_DESC lives in models.py: the MCP make_debt_payment tool uses it too.
 
 
 def _unified_debts():
@@ -5431,7 +5331,7 @@ def _home_move_current_homes():
 
 def _home_move_monthly_income():
     total = 0
-    for r in db.recurring_transactions.find({'transaction_type': 'income'}):
+    for r in db.recurring_transactions.find({'transaction_type': 'income', **ACTIVE_RECURRING}):
         try:
             total += calc_monthly_amount(r['amount'], r['frequency'], r.get('day_of_month'))
         except Exception:
@@ -6219,59 +6119,20 @@ def calendar_events_api():
         if r_end and r_end < month_start:
             continue
 
-        # Biweekly: emit an event on each 14-day occurrence within the month
-        if r['frequency'] == 'biweekly':
-            d = r_start
-            if d < month_start:
-                d += timedelta(days=((month_start - d).days + 13) // 14 * 14)
-            while d <= month_end:
-                if not (r_end and d > r_end):
-                    events.append({
-                        'id': str(r['_id']),
-                        'title': r['description'],
-                        'date': d.isoformat(),
-                        'amount': r['amount'],
-                        'type': r['transaction_type'],
-                        'category': r.get('category', 'Other'),
-                        'auto_pay': r.get('auto_pay', False)
-                    })
-                d += timedelta(days=14)
-            continue
-
-        # Check frequency
-        applies = False
-        if r['frequency'] == 'monthly':
-            applies = True
-        elif r['frequency'] == 'yearly' and r_start.month == month:
-            applies = True
-        elif r['frequency'] == 'bi-monthly':
-            month_diff = (year - r_start.year) * 12 + (month - r_start.month)
-            if month_diff >= 0 and month_diff % 2 == 0:
-                applies = True
-
-        if applies:
-            days = []
-            if r.get('day_of_month'):
-                for d in str(r['day_of_month']).split(','):
-                    try:
-                        day = int(d.strip())
-                        day = min(day, month_end.day)
-                        days.append(day)
-                    except ValueError:
-                        pass
-            if not days:
-                days = [1]
-
-            for day in days:
-                events.append({
-                    'id': str(r['_id']),
-                    'title': r['description'],
-                    'date': f"{year}-{month:02d}-{day:02d}",
-                    'amount': r['amount'],
-                    'type': r['transaction_type'],
-                    'category': r.get('category', 'Other'),
-                    'auto_pay': r.get('auto_pay', False)
-                })
+        # Same schedule as the ledger outlook (weekly, biweekly, monthly,
+        # bi-monthly, yearly), minus any occurrence after the end date
+        for d in occurrence_dates(r, month_start, month_end):
+            if r_end and d > r_end:
+                continue
+            events.append({
+                'id': str(r['_id']),
+                'title': r['description'],
+                'date': d.isoformat(),
+                'amount': r['amount'],
+                'type': r['transaction_type'],
+                'category': r.get('category', 'Other'),
+                'auto_pay': r.get('auto_pay', False)
+            })
 
     # Sort by date
     events.sort(key=lambda x: x['date'])
@@ -7254,24 +7115,42 @@ def calculate_payroll(employee, gross_wages, pay_date, settings=None):
     threshold = float(settings.get('fica_annual_threshold', 2800))
 
     # Relationship / age exemptions (IRS Pub 926):
-    # - Your child under 21: exempt
-    # - Your parent (with some exceptions): generally exempt
+    # - Your child under 21: exempt from FICA and FUTA
+    # - Your parent (with some exceptions): generally exempt from FICA; exempt from FUTA
     # - Employee under 18 whose principal occupation isn't household work: exempt
+    #   from FICA only
+    # The child test is age 21, not 18; under_18 also implies under 21, so
+    # records saved before the under_21 flag existed still qualify.
     rel = (employee.get('relationship') or '').lower()
+    is_child = rel in ('child', 'son', 'daughter')
+    is_parent = rel in ('parent', 'mother', 'father')
+    child_under_21 = is_child and (employee.get('under_21') or employee.get('under_18'))
     fica_exempt = False
-    if rel in ('child', 'son', 'daughter') and employee.get('under_18'):
+    if child_under_21:
         fica_exempt = True
         notes.append('FICA exempt: child under 21')
-    elif rel in ('parent', 'mother', 'father'):
+    elif is_parent:
         fica_exempt = True
         notes.append('FICA exempt: parent (verify Pub 926 exceptions)')
     elif employee.get('under_18'):
         fica_exempt = True
         notes.append('FICA exempt: employee under 18 (verify principal occupation)')
+    futa_exempt = bool(child_under_21 or is_parent)
+    if futa_exempt:
+        notes.append('FUTA exempt: ' + ('child under 21' if child_under_21 else 'parent'))
 
     fica_applies = (not fica_exempt) and (ytd_with_this >= threshold)
     if not fica_applies and not fica_exempt:
         notes.append(f'FICA not yet triggered (YTD ${ytd_with_this:,.2f} < threshold ${threshold:,.2f})')
+
+    # Once the year's cash wages reach the threshold, ALL of them are subject
+    # to FICA, not just the part above it (Pub 926). Earlier runs this year
+    # were under the threshold and taxed nothing, so the run that crosses it
+    # catches up the FICA on those earlier wages.
+    catch_up_wages = ytd_prior if (fica_applies and ytd_prior < threshold) else 0.0
+    if catch_up_wages:
+        notes.append(f'FICA threshold crossed: includes catch-up on ${catch_up_wages:,.2f} '
+                     f'of earlier wages this year')
 
     ss_rate = float(settings.get('ss_rate', 0.062))
     mc_rate = float(settings.get('medicare_rate', 0.0145))
@@ -7284,13 +7163,16 @@ def calculate_payroll(employee, gross_wages, pay_date, settings=None):
     if fica_applies:
         remaining_base = max(0.0, ss_base - ytd_prior)
         ss_wages = min(float(gross_wages), remaining_base)
+        # Catch-up wages sit below the base by definition (they're under the threshold)
+        ss_wages += min(catch_up_wages, ss_base)
 
     ee_ss = round(ss_wages * ss_rate, 2)
     er_ss = round(ss_wages * ss_rate, 2)
 
     # Medicare — all wages
-    ee_medicare = round(float(gross_wages) * mc_rate, 2) if fica_applies else 0.0
-    er_medicare = round(float(gross_wages) * mc_rate, 2) if fica_applies else 0.0
+    medicare_wages = float(gross_wages) + catch_up_wages
+    ee_medicare = round(medicare_wages * mc_rate, 2) if fica_applies else 0.0
+    er_medicare = round(medicare_wages * mc_rate, 2) if fica_applies else 0.0
 
     # Additional Medicare (employee only, over annual threshold)
     ee_addl_medicare = 0.0
@@ -7310,7 +7192,7 @@ def calculate_payroll(employee, gross_wages, pay_date, settings=None):
     futa_rate = float(settings.get('futa_rate', 0.006))
     futa_base = float(settings.get('futa_wage_base', 7000))
     futa_remaining = max(0.0, futa_base - ytd_prior)
-    futa_wages = min(float(gross_wages), futa_remaining)
+    futa_wages = 0.0 if futa_exempt else min(float(gross_wages), futa_remaining)
     er_futa = round(futa_wages * futa_rate, 2)
 
     # Employer SUTA — varies by state
@@ -7440,6 +7322,7 @@ def payroll_employee_form(employee_id=None):
         employee = db.household_employees.find_one({'_id': oid})
         if not employee:
             return "Not found", 404
+        employee.setdefault('under_21', False)  # older records predate the flag
 
     if request.method == 'POST':
         def parse_date(s):
@@ -7460,6 +7343,7 @@ def payroll_employee_form(employee_id=None):
             'relationship': request.form.get('relationship', '').strip() or None,
             'lives_with_employer': bool(request.form.get('lives_with_employer')),
             'under_18': bool(request.form.get('under_18')),
+            'under_21': bool(request.form.get('under_21')),
             'notes': request.form.get('notes', '').strip() or None,
             'active': bool(request.form.get('active', 'on')),
         }
@@ -7637,55 +7521,13 @@ def payroll_w2(employee_id, year):
 @app.route('/payroll/schedule-h/<int:year>')
 def payroll_schedule_h(year):
     settings = get_payroll_settings()
-    employees = {e['_id']: e for e in db.household_employees.find()}
-    entries = list(db.payroll_entries.find())
-    entries = [e for e in entries if e.get('pay_date') and hasattr(e['pay_date'], 'year') and e['pay_date'].year == year]
-
     # Aggregate all employees (Schedule H is for the household, not per-employee)
-    totals = {
-        'cash_wages_fica': 0.0,        # Line 1a total cash wages (subject to SS/Medicare)
-        'ss_tax': 0.0,                 # Line 1 SS tax (ee + er)
-        'medicare_tax': 0.0,           # Line 3 Medicare tax (ee + er)
-        'addl_medicare': 0.0,          # Line 5 Additional Medicare
-        'fit_withheld': 0.0,           # Line 7 Federal income tax withheld
-        'futa_wages': 0.0,             # FUTA section
-        'futa_tax': 0.0,
-        'state_suta': 0.0,
-        'total_wages': 0.0,
-    }
-    per_emp = {}
-    for e in entries:
-        eid = e.get('employee_id')
-        emp = employees.get(eid)
-        if not emp:
-            continue
-        bucket = per_emp.setdefault(str(eid), {'name': emp['name'], 'gross': 0, 'fica_wages': 0})
-        gross = float(e.get('gross_wages', 0) or 0)
-        bucket['gross'] += gross
-        totals['total_wages'] += gross
-        if float(e.get('ee_ss', 0) or 0) > 0 or float(e.get('ee_medicare', 0) or 0) > 0:
-            totals['cash_wages_fica'] += gross
-            bucket['fica_wages'] += gross
-        totals['ss_tax'] += float(e.get('ee_ss', 0) or 0) + float(e.get('er_ss', 0) or 0)
-        totals['medicare_tax'] += float(e.get('ee_medicare', 0) or 0) + float(e.get('er_medicare', 0) or 0)
-        totals['addl_medicare'] += float(e.get('ee_addl_medicare', 0) or 0)
-        totals['fit_withheld'] += float(e.get('ee_fit', 0) or 0)
-        totals['futa_tax'] += float(e.get('er_futa', 0) or 0)
-        totals['state_suta'] += float(e.get('er_suta', 0) or 0)
-
-    # FUTA wages = the wage base portion used. Reverse from tax amount.
-    futa_rate = float(settings.get('futa_rate', 0.006)) or 0.006
-    totals['futa_wages'] = round(totals['futa_tax'] / futa_rate, 2) if futa_rate else 0
-    addl_rate = float(settings.get('additional_medicare_rate', 0.009)) or 0.009
-    totals['addl_medicare_wages'] = round(totals['addl_medicare'] / addl_rate, 2) if addl_rate else 0
-    totals['total_household_tax'] = round(
-        totals['ss_tax'] + totals['medicare_tax'] + totals['addl_medicare']
-        + totals['fit_withheld'] + totals['futa_tax'], 2)
+    totals, per_emp = _schedule_h_totals(year, settings)
 
     return render_template('payroll_schedule_h.html',
                            year=year,
                            totals=totals,
-                           per_emp=list(per_emp.values()),
+                           per_emp=per_emp,
                            settings=settings)
 
 
@@ -7758,14 +7600,20 @@ def _schedule_h_totals(year, settings):
         bucket['gross'] += gross
         totals['total_wages'] += gross
         if float(e.get('ee_ss', 0) or 0) > 0 or float(e.get('ee_medicare', 0) or 0) > 0:
-            totals['cash_wages_fica'] += gross
-            bucket['fica_wages'] += gross
+            bucket['fica'] = True
         totals['ss_tax'] += float(e.get('ee_ss', 0) or 0) + float(e.get('er_ss', 0) or 0)
         totals['medicare_tax'] += float(e.get('ee_medicare', 0) or 0) + float(e.get('er_medicare', 0) or 0)
         totals['addl_medicare'] += float(e.get('ee_addl_medicare', 0) or 0)
         totals['fit_withheld'] += float(e.get('ee_fit', 0) or 0)
         totals['futa_tax'] += float(e.get('er_futa', 0) or 0)
         totals['state_suta'] += float(e.get('er_suta', 0) or 0)
+    # Once an employee's wages cross the FICA threshold, every cash wage paid
+    # them that year is subject (Pub 926) — including runs before the crossing,
+    # whose FICA was caught up on the crossing run.
+    for bucket in per_emp.values():
+        if bucket.pop('fica', False):
+            bucket['fica_wages'] = bucket['gross']
+            totals['cash_wages_fica'] += bucket['gross']
     futa_rate = float(settings.get('futa_rate', 0.006)) or 0.006
     addl_rate = float(settings.get('additional_medicare_rate', 0.009)) or 0.009
     totals['futa_wages'] = round(totals['futa_tax'] / futa_rate, 2)
@@ -8130,8 +7978,14 @@ def _benefit_context(year, today=None):
     # Statement charges let the page infer which credits were actually used
     # instead of asking for a hundred checkboxes.
     cc_txns = list(db.cc_transactions.find({'date': window}))
+    # A card's fee and anniversary month come from its latest annual-fee
+    # charge, which may predate this year — so these aren't year-bounded.
+    fee_txns = list(db.cc_transactions.find({
+        'description': {'$regex': benefits.ANNUAL_FEE_PATTERN.pattern, '$options': 'i'},
+        'amount': {'$gt': 0}}))
     card_perks = benefits.build_card_perks(cards, usage, year, today=today,
-                                           transactions=cc_txns)
+                                           transactions=cc_txns,
+                                           fee_transactions=fee_txns)
 
     alerts = benefits.build_alerts(groups, card_perks, match, year, today=today)
     return {
