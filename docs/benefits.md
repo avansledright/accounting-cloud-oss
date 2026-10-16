@@ -202,8 +202,8 @@ A card in `cc_cards` (created on the credit-cards page, see
 
 | Field | Meaning |
 |---|---|
-| `annual_fee` | Dollars per year |
-| `fee_month` | Month (1-12) the annual fee posts. Anchors the cardmember year. Defaults to January when unset. |
+| `annual_fee` | Dollars per year. When unset, filled in memory from the latest annual-fee charge on the statements (see [Annual fee and fee month](#annual-fee-and-fee-month)) |
+| `fee_month` | Month (1-12) the annual fee posts. Anchors the cardmember year. When unset, taken from the latest annual-fee charge; January if there is none. |
 | `perks` | List of statement credits (below) |
 | `benefits` | List of non-credit benefits (below) |
 | `template_key` | Which template was loaded, so detection can fall back to its merchant patterns |
@@ -280,7 +280,13 @@ its usage rows.
 
 ### Card figures
 
-`build_card_perks()` computes per card:
+`build_card_perks(cards, usage_docs, year, today=None, transactions=None, fee_transactions=None)`
+computes per card. `transactions` are the year's `cc_transactions` used for
+usage detection; `fee_transactions` are annual-fee charges from any year (the
+route queries `cc_transactions` with `ANNUAL_FEE_PATTERN` and `amount > 0`,
+not bounded by year, because the latest fee can predate the year in view) and
+default to `transactions`. Each card also carries `fee_detected` and
+`fee_month_detected` flags when those values came from a statement.
 
 | Figure | Meaning |
 |---|---|
@@ -338,7 +344,11 @@ the old perk ids are orphaned.
 **Inline suggestion.** A card with no credits shows a one-click "Load ...
 credits" button for its likely template, chosen by `suggest_template()` from the
 card's name and issuer (`platinum` + `amex`/`american express`, `sapphire`, or
-`aadvantage`/`executive`/`citi`). The button sits right on the empty card rather
+for the Citi template `aadvantage`, `american airlines`, or `executive`
+together with `citi`). Matching keys on the product name, not the issuer:
+issuer `citi` alone (a Double Cash, Custom Cash or Premier) does not match,
+so those cards are not offered the AAdvantage Executive's fee and credits.
+The button sits right on the empty card rather
 than behind a menu, so an empty card reads as "not loaded yet" rather than as
 missing data. The full template picker is under "Card settings & add a credit".
 
@@ -359,11 +369,21 @@ period. Where useful they are listed as non-credit `benefits` instead.
 
 ### Annual fee and fee month
 
-`annual_fee` and `fee_month` are set on the card's settings form
-(`POST /benefits/card`), and `annual_fee` is also set when a template is loaded.
-Set `fee_month` to the month the fee actually posts on your statement (search
-your imported transactions for `ANNUAL FEE`, which the keyword rules categorise
-as `Fees & Interest`); anniversary-basis credits are anchored to it.
+`annual_fee` and `fee_month` can be set on the card's settings form
+(`POST /benefits/card`), and `annual_fee` is also set when a template is
+loaded. Anniversary-basis credits are anchored to `fee_month`.
+
+When either is missing, it is derived from the statements.
+`benefits.detect_annual_fee(card, transactions)` finds the card's most recent
+charge whose description matches `ANNUAL_FEE_PATTERN` (`ANNUAL FEE`, as Citi
+prints it, or `ANNUAL MEMBERSHIP FEE`, as Amex and Chase print it), in any
+year, counting positive charges only (a fee reversal is a negative credit
+line). It returns that charge's amount and month, or `(None, None)`.
+`build_card_perks()` fills only the missing value(s), on a copy of the card in
+memory: nothing is written back to `cc_cards`, and a value entered by hand
+always wins. The card then shows "net of ... fee (from statement)" and the
+settings form notes that the value was filled in from the latest annual-fee
+charge and that saving a value overrides it.
 
 ### Perk alerts
 

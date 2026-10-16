@@ -49,10 +49,15 @@ or `target_payment` is non-zero.
    `current_monthly_housing` and `current_tax_annual`. The form also has a
    "Prefill from" dropdown listing every property, which fills the same fields
    client-side.
-5. Monthly income for the housing-ratio check is the sum of every recurring
-   income item converted to a monthly amount (`_home_move_monthly_income`).
+5. Monthly income for the housing-ratio check is the sum of every active
+   recurring income item (queried with `ACTIVE_RECURRING`, so archived lines
+   are excluded) converted to a monthly amount with `calc_monthly_amount()`
+   (`_home_move_monthly_income`).
 6. If `solve_for == 'payment'` and `target_payment > 0`,
-   `solve_price_for_payment()` runs; otherwise `calculate_home_move()`.
+   `solve_price_for_payment()` runs; otherwise `calculate_home_move()`. When
+   the reverse solve runs with `target_basis == 'year1'`,
+   `compare_buydowns()` also runs (see
+   [Comparing buydowns](#comparing-buydowns-compare_buydowns)).
 
 ## The calculation (`calculate_home_move`)
 
@@ -149,6 +154,12 @@ PMI  = loan x pmi_rate_pct / 100 / 12           only when LTV > 80%
 PITI = P&I + tax/12 + insurance/12 + PMI + hoa_monthly
 ```
 
+`monthly.by_year` lists the total payment year by year, each entry
+`{label, rate, total}`: with a buydown, `Year 1` (and `Year 2` for a 2-1) at
+the reduced rate, then `Year 2+` or `Year 3+` at the note rate; without one, a
+single `Every year` entry. `monthly.first_year_total` is the first entry's
+total (equal to `monthly.total` when there is no buydown).
+
 The result compares PITI with `current_monthly_housing` (monthly and annual
 difference) and, when budgeted income exists, reports a housing ratio
 (PITI / monthly income). The page flags above 28% and warns above 36%.
@@ -204,7 +215,7 @@ difference. The loan still amortizes at the note rate.
 cost = sum over buydown years of (full payment - reduced payment) x 12
 ```
 
-The label is built from the reductions, e.g. `2-1-0`. With
+The label is the year-1 and year-2 reductions, e.g. `2-1` or `1-0`. With
 `buydown_payer = 'buyer'` the cost is added to closing costs (and included in
 the `proceeds` fixed point). With `'seller'` it is a seller concession and does
 not affect cash to close. The monthly figures reported as PITI are at the note
@@ -215,7 +226,14 @@ rate; the per-year reduced payments are listed with the buydown.
 With `solve_for = 'payment'` and a `target_payment` (total monthly PITI plus
 HOA), the planner finds the highest purchase price whose payment does not exceed
 the target, holding every other input fixed (rate, loan type, down-payment mode,
-sale side and so on).
+buydown, sale side and so on).
+
+`target_basis` chooses which payment the target refers to:
+
+| `target_basis` | Payment compared with the target |
+|---|---|
+| `note` (default) | `monthly.total`, the note-rate payment (year 3+ under a 2-1 buydown) |
+| `year1` | `monthly.first_year_total`, the first-year payment under the buydown |
 
 Total payment rises monotonically with price, so the function bisects between
 $0 and `max_price` ($20,000,000) for up to 60 iterations or until the bracket is
@@ -224,8 +242,21 @@ under the target. If even `max_price` cannot reach the target, or the result is
 zero, it returns `(None, None)` and the page falls back to a normal calculation
 with whatever `purchase_price` was supplied.
 
-The payment is evaluated at the note rate, so a temporary buydown does not
-increase the solved price.
+With `target_basis = 'note'` a temporary buydown does not increase the solved
+price. With `'year1'` the reduced first-year payment is matched, so a buydown
+raises the affordable price; the page then states the payment the loan steps
+up to once the buydown ends (and the year-2 payment for a 2-1), and notes that
+lenders qualify a temporary buydown at the full note-rate payment.
+
+### Comparing buydowns (`compare_buydowns`)
+
+`compare_buydowns(p, rates, monthly_income)` re-runs the reverse solve with
+`target_basis = 'year1'` for each entry in `BUYDOWN_OPTIONS` (none, 1-0 and
+2-1), keeping every other input as entered. Each row has the label, the
+maximum price, the loan, `by_year`, the note-rate total, the buydown cost and
+cash to close; an option the solver cannot satisfy is left out. The page shows
+it as a table (buydown, max price, year 1, year 2 and year 3+ payments,
+buydown cost) when `solve_for = 'payment'` and `target_basis = 'year1'`.
 
 ## Live rates (`fetch_mortgage_rates`)
 
@@ -292,6 +323,7 @@ look up automatically".
 | `purchase_price` | 0 | Price of the new home |
 | `solve_for` | `price` | `price` (normal) or `payment` (reverse: solve price from target payment) |
 | `target_payment` | 0 | Desired total monthly payment (PITI plus HOA) when `solve_for = payment` |
+| `target_basis` | `note` | Which payment `target_payment` means: `note` (note-rate payment, after any buydown) or `year1` (first-year payment with the buydown). Any other value becomes `note` |
 | `down_mode` | `pct` | `pct`, `amount` or `proceeds` |
 | `down_payment_pct` | 20.0 | Down payment percent in `pct` mode |
 | `down_payment_amount` | 0 | Down payment dollars in `amount` mode |

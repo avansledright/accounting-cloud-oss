@@ -65,7 +65,7 @@ Short-lived daemon threads are also spawned on demand:
 
 `mcp_server.py` is a separate, standalone process (the `mcp` profile in `docker-compose.yml`, command `python mcp_server.py`). It does **not** import `app.py`. It opens its own `MongoClient` with the same `MONGO_URI` / `MONGO_DB_NAME`, calls `agent_db.init(db)`, and registers read tools from `agent/tools/*` and write tools from `agent/tools/writes.py`. Every request must carry `Authorization: Bearer <MCP_API_TOKEN>` (`BearerAuthASGI`); with no token configured it refuses everything. See [mcp-server.md](mcp-server.md).
 
-Because the MCP server does not import `app.py`, it does not start the stock refresh or report scheduler threads, and its tools reimplement some calculations rather than calling the web app's functions (for example, `agent/tools/cashflow.py` has its own simplified outlook rather than `calculate_yearly_outlook()`).
+Because the MCP server does not import `app.py`, it does not start the stock refresh or report scheduler threads. Logic both processes need lives in modules with no Flask or database dependency: `recurrence.py` (when a recurring item occurs and its monthly equivalent) and `models.py` (document shapes, `Transaction` / `Transfer`, account types, `EXTRA_DEBT_PAYMENT_DESC`). The write tools build documents with the same models and defaults as the web routes. Some read tools are still simpler than the web pages: `agent/tools/cashflow.py` counts the same occurrence dates as `calculate_yearly_outlook()` but does not apply actuals, dedup, skips, overrides or the loan payoff simulation (see [mcp-server.md](mcp-server.md#read-tools)).
 
 ### The `agent/` package
 
@@ -85,8 +85,9 @@ Shared by both processes:
 |---|---|
 | `app.py` | The Flask app: configuration, middleware, every route, and nearly all business logic (ledger outlook, budget, debts and loan amortization, goals, net worth, credit cards, payroll, benefits routes, export/import). About 8,000 lines. |
 | `models.py` | Plain data classes (`Transaction`, `RecurringTransaction`, `ProjectedOverride`, `Account`, `Asset`, `SavingsGoal`, `Transfer`, `RecurringTransfer`, `Debt`, `PaymentPlan`, `NetWorthSnapshot`, `Holding`, `HouseholdEmployee`, `PayrollEntry`, `Dividend`) and shared constants (`CATEGORIES`, `INCOME_CATEGORIES`, `ACCOUNT_TYPES`, `INVESTMENT_ACCOUNT_TYPES`, `CASH_ACCOUNT_TYPES`, `DEBT_TYPES`, `ASSET_TYPES`, `LIABILITY_TYPES`, `GOAL_TYPES`, `CARD_ISSUERS`, `CC_CATEGORIES`, merchant categorization rules, `PAYROLL_DEFAULTS`, `PAY_FREQUENCIES`). Routes insert `Model(...).__dict__`, so the stored document has exactly the constructor's attributes; `to_dict()` is only used for JSON responses. |
-| `benefits.py` | Pure functions for tax-year contribution room (IRS limit seeds in `CONTRIBUTION_LIMITS`), employer match, credit-card statement-credit periods, perk templates and alerts. No database access; `app.py` loads the documents and passes them in. See [benefits.md](benefits.md). |
-| `home_move.py` | Pure "sell one home, buy another" calculator (`parse_params`, `calculate_home_move`, `solve_price_for_payment`) plus a Freddie Mac PMMS rate fetch via FRED. See [home-move.md](home-move.md). |
+| `recurrence.py` | Pure recurring-schedule math: `occurrence_dates(item, month_start, month_end)` (the dates a recurring transaction or transfer falls on within one month, on or after its start date; callers apply `end_date`), `calc_monthly_amount(amount, frequency, day_of_month)` (monthly equivalent) and `to_date()`. Frequencies: `weekly` (every start weekday), `biweekly` (every 14 days from the start date; 26/12 per month on average), `monthly` (each listed day, so `"15,30"` is two a month), `bi-monthly` (every other month from the start month, on the listed days; monthly equivalent is amount × days / 2), `yearly` (the start month). Used by `calculate_yearly_outlook()`, `/api/calendar/events`, the budget and account pages, and the agent tools `recurring_items` (`agent/tools/budget.py`) and the cash flow outlook (`agent/tools/cashflow.py`). |
+| `benefits.py` | Pure functions for tax-year contribution room (IRS limit seeds in `CONTRIBUTION_LIMITS`), employer match, credit-card statement-credit periods, perk templates and alerts, and annual-fee detection from statement charges (`detect_annual_fee`). No database access; `app.py` loads the documents and passes them in. See [benefits.md](benefits.md). |
+| `home_move.py` | Pure "sell one home, buy another" calculator (`parse_params`, `calculate_home_move`, `solve_price_for_payment`, `compare_buydowns`; the reverse solve can target the note-rate or the year-1 buydown payment via `target_basis`) plus a Freddie Mac PMMS rate fetch via FRED. See [home-move.md](home-move.md). |
 | `payroll_forms.py` | Fills IRS fillable W-2 and Schedule H PDFs and builds EFW2 files for household-employer payroll. PDF templates are resolved through `set_template_resolver()` (the app supplies `_template_from_db`, reading `form_templates`) with a fallback to the `forms/` directory. |
 | `payroll_validator.py` | Local EFW2 validator (`validate_efw2`, `summarize`) based on SSA Pub 42-007. |
 | `mcp_server.py` | Standalone MCP server (see above). |
@@ -96,7 +97,7 @@ Shared by both processes:
 | `static/style.css` | Stylesheet. |
 | `forms/` | Field maps for the IRS PDFs (`w2_fieldmap.json`, `schedule_h_fieldmap.json`); fillable PDFs can be dropped here or uploaded through the app. |
 | `scripts/seed_demo.py` | Seeds a demo dataset. `scripts/backup-accounting.sh` is a backup helper. |
-| `tests/` | pytest suite for the pure modules and prompts. |
+| `tests/` | pytest suite: pure modules and prompts, plus app-level tests (web routes, MCP read and write tools, payroll, card perks, home move, deploy config) that run against a shared `mongomock` fixture in `tests/conftest.py`. See [development.md](development.md). |
 
 ## Request flow
 
@@ -250,7 +251,7 @@ Written by `add_account`, `edit_account`, `update_account_balance`, `derive_acco
 
 ### transactions
 
-Actual (realized) ledger entries. Written by `handle_transactions` (JSON POST), `verify_transaction`, `add_transfer` (two rows per transfer), `edit_transaction`, `import_transactions_csv`, `log_debt_payment`, `payroll_run`, the loan link routes, `_auto_link_transaction` / `_apply_auto_links`, and MCP `add_transaction` / `update_transaction`. Model: `Transaction`.
+Actual (realized) ledger entries. Written by `handle_transactions` (JSON POST), `verify_transaction`, `add_transfer` (two rows per transfer), `edit_transaction`, `import_transactions_csv`, `log_debt_payment`, `payroll_run`, the loan link routes, `_auto_link_transaction` / `_apply_auto_links`, and MCP `add_transaction` / `update_transaction` / `add_transfer` (two rows per transfer) / `make_debt_payment`. Model: `Transaction`.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -258,8 +259,8 @@ Actual (realized) ledger entries. Written by `handle_transactions` (JSON POST), 
 | `amount` | float | Always a positive magnitude |
 | `date` | datetime | Transaction date (string ISO dates in very old records are tolerated on read) |
 | `transaction_type` | str | `income` or `expense` |
-| `account_id` | ObjectId or null | Owning account; null means the primary account. Rows from `/import/csv/transactions` have no `account_id` key at all |
-| `debt_id` | ObjectId | Present only when the row is a payment toward a standalone debt. Set by auto-linking, `/debts/<id>/link-transaction`, `/transactions/link-loan`, or `log_debt_payment`; removed (`$unset`) when unlinked or when the debt is deleted |
+| `account_id` | ObjectId or null | Owning account; null means the primary account (the web form and MCP `add_transaction` store the primary account's ID when none is chosen). Rows from `/import/csv/transactions` have no `account_id` key at all |
+| `debt_id` | ObjectId | Present only when the row is a payment toward a standalone debt. Set by auto-linking, `/debts/<id>/link-transaction`, `/transactions/link-loan`, `log_debt_payment` or MCP `make_debt_payment`; removed (`$unset`) when unlinked or when the debt is deleted |
 | `asset_liability_id` | ObjectId | Present only when the row is a payment toward an asset's loan. Mutually exclusive with `debt_id` |
 | `category` | str | Optional. Read by `/api/analytics/spending-by-category` (defaulting to `Other`); nothing in the web app writes it |
 
@@ -322,11 +323,11 @@ One-time transfer history. Written by `add_transfer`, `verify_transaction` (when
 | `description` | str | Default `Account Transfer` |
 | `notes` | str or null | |
 
-The web routes also insert the two matching `transactions` rows; the MCP `add_transfer` tool inserts only the `transfers` document. `benefits.py` reads transfers into retirement accounts as contributions.
+The web route and the MCP `add_transfer` tool both also insert the two matching `transactions` rows. `benefits.py` reads transfers into retirement accounts as contributions.
 
 ### skipped_transactions
 
-Written by `skip_transaction` and `delete_transaction` (deleting an actual transaction records a skip so its projection does not reappear).
+Written by `skip_transaction`, `delete_transaction` and MCP `delete_transaction` (deleting an actual transaction records a skip so its projection does not reappear).
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -340,7 +341,7 @@ Written by `update_projected_amount` (web) and MCP `override_recurring_amount`. 
 | Field | Type | Meaning |
 |---|---|---|
 | `recurring_id` | ObjectId | The recurring transaction or recurring transfer |
-| `date` | str | `YYYY-MM-DD` of the occurrence. The outlook looks overrides up by this string; the MCP tool writes a datetime here instead |
+| `date` | str | `YYYY-MM-DD` of the occurrence. The outlook looks overrides up by this string, which the web route and the MCP tool both write. A datetime here (written by older MCP versions) is normalized to the same string when the outlook reads it |
 | `amount` | float | Replacement amount for that one occurrence |
 
 ### budget_targets
@@ -364,7 +365,7 @@ Per-month overrides. Written by `set_budget_targets`, `reset_month_targets`, MCP
 
 ### debts
 
-Standalone debts (credit cards, personal and student loans, medical). Written by `add_debt`, `edit_debt`, `import_debts_csv`, `_seed_default_matches`, MCP `add_debt` / `update_debt_balance` / `make_debt_payment`. Model: `Debt`.
+Standalone debts (credit cards, personal and student loans, medical). Written by `add_debt`, `edit_debt`, `import_debts_csv`, `_seed_default_matches`, MCP `add_debt` / `update_debt_balance` (sets the starting balance; MCP `make_debt_payment` writes a linked `transactions` row instead). Model: `Debt`.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -618,8 +619,10 @@ Written by `payroll_employee_form`. Model: `HouseholdEmployee`.
 | `funding_account_id` | ObjectId or null | Account net pay is drawn from |
 | `fit_per_period`, `sit_per_period` | float | Flat federal and state withholding per period |
 | `state` | str or null | Two-letter code; overrides the payroll setting |
-| `relationship` | str or null | Affects FICA exemptions |
-| `lives_with_employer`, `under_18` | bool | |
+| `relationship` | str or null | Affects FICA and FUTA exemptions (`child`/`son`/`daughter`, `parent`/`mother`/`father`, or other) |
+| `lives_with_employer` | bool | |
+| `under_18` | bool | Under 18. An unrelated employee under 18 is exempt from FICA only; for a child it also satisfies the under-21 test |
+| `under_21` | bool | Your child under 21: with a child relationship, exempt from FICA and FUTA. Missing on older records (treated as `false`) |
 | `notes` | str or null | |
 | `active` | bool | |
 

@@ -235,8 +235,10 @@ Returns a list of `months + 1` points:
 ### Account detail chart
 
 On `/accounts/<account_id>`, if the account is an investment account and has a
-non-zero `estimated_return_rate`, the page builds a projection with
-`months = int(request.args.get('horizon', 120))`. The template offers a
+non-zero `estimated_return_rate`, the page builds a projection over
+`?horizon=` months (default 120). A value that is not an integer, or is
+outside 1–600 months, falls back to 120 rather than raising an error. The
+template offers a
 **Projection Horizon** selector that reloads the page with:
 
 | Option | Query string |
@@ -246,7 +248,7 @@ non-zero `estimated_return_rate`, the page builds a projection with
 | 20 years | `?horizon=240` |
 | 30 years | `?horizon=360` |
 
-Any other month count can be passed by hand. The page also lists recurring
+Any other month count from 1 to 600 can be passed by hand. The page also lists recurring
 items that touch the account (income and inbound transfers as deposits,
 outbound transfers as withdrawals), with their monthly equivalents.
 

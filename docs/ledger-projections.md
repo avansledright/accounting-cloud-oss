@@ -66,7 +66,7 @@ For each month in the window the function builds `month_transactions` from three
 | `account_id`, `account_name` | Owning account; a missing `account_id` means the primary account |
 | `loan_ref`, `loan_label` | For expenses linked to a loan: `debt:<id>` / `asset:<id>` and the loan name (shown as a purple badge) |
 
-**2. Projected recurring transactions** (from `recurring_transactions` filtered with `ACTIVE_RECURRING`, plus any `sim['additions']`). An item is considered for the month unless its `start_date` is after the month end or its `end_date` is before the month start. Occurrence dates:
+**2. Projected recurring transactions** (from `recurring_transactions` filtered with `ACTIVE_RECURRING`, plus any `sim['additions']`). An item is considered for the month unless its `start_date` is after the month end or its `end_date` is before the month start. Occurrence dates come from `recurrence.occurrence_dates(item, month_start, month_end)`, the pure function the calendar, budget pages and agent tools also use:
 
 - `weekly`: every day in the month with the same weekday as `start_date`, on or after `start_date`.
 - `biweekly`: every 14 days from `start_date`, fast-forwarded into the month.
@@ -84,9 +84,9 @@ Both carry `is_transfer: True`, `transfer_from_id` and `transfer_to_id`. In the 
 
 ### Per-occurrence overrides: `projected_overrides`
 
-Before the walk, every document in `projected_overrides` is loaded into a dict keyed by `(str(recurring_id), date)`, where `date` is the `YYYY-MM-DD` string. When a projected row's `(recurring_id, date)` matches, its amount becomes the override (`has_override: True`) while `base_amount` keeps the regular amount. Overrides apply to recurring transactions and recurring transfers alike.
+Before the walk, every document in `projected_overrides` is loaded into a dict keyed by `(str(recurring_id), date)`, where `date` is the `YYYY-MM-DD` string (a datetime `date`, written by older versions of the MCP `override_recurring_amount` tool, is converted to that string first). When a projected row's `(recurring_id, date)` matches, its amount becomes the override (`has_override: True`) while `base_amount` keeps the regular amount. Overrides apply to recurring transactions and recurring transfers alike.
 
-On the ledger, clicking a projected amount edits it in place and posts to `POST /projected/update-amount` (`update_projected_amount`) with `recurring_id`, `date` and `amount`, which upserts the override.
+On the ledger, clicking a projected amount edits it in place and posts to `POST /projected/update-amount` (`update_projected_amount`) with `recurring_id`, `date` and `amount`, which upserts the override. The MCP `override_recurring_amount` tool writes the same document.
 
 ### Matching actuals to projections (dedup)
 
@@ -249,4 +249,4 @@ The loan payoff simulation still runs inside the simulator and always starts fro
 
 ## Agent and MCP outlook
 
-The MCP tools `cash_flow_outlook` and `negative_balance_months` use `_generate_outlook()` in `agent/tools/cashflow.py`, a separate, simplified monthly estimate. It does not use actual transactions, dedup, skips, overrides or the loan payoff simulation, and it counts occurrences per month with fixed multipliers. Expect its numbers to differ from the ledger. See [mcp-server.md](mcp-server.md).
+The MCP tools `cash_flow_outlook` and `negative_balance_months` use `_generate_outlook()` in `agent/tools/cashflow.py`, a separate, simplified monthly estimate. Its schedule matches the ledger: each recurring item and recurring transfer contributes the occurrences `recurrence.occurrence_dates()` returns for the month (the same function `calculate_yearly_outlook()` uses), archived loan lines are excluded, and an item or call with no `account_id` means the primary account. It starts from the account's stored balance and does not use actual transactions, dedup, skips, overrides or the loan payoff simulation, so expect its numbers to differ from the ledger once any of those apply. See [mcp-server.md](mcp-server.md).

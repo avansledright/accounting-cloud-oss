@@ -100,20 +100,32 @@ pip install -r requirements-dev.txt   # requirements.txt + pytest + mongomock
 pytest tests/
 ```
 
-Most of the suite covers pure modules. Route tests swap in
+Part of the suite covers pure modules. App-level tests swap in
 [mongomock](https://github.com/mongomock/mongomock) before importing `app.py`
 (which connects to MongoDB at import time), so no database is needed; they
-are skipped if mongomock is not installed.
+are skipped if mongomock is not installed. `tests/conftest.py` provides the
+shared fixtures: `app_module` (imports `app.py` once per session with
+`pymongo.MongoClient` patched to mongomock and the report scheduler disabled,
+with CSRF off), `db` (the app's mongomock database, emptied before each test;
+the agent/MCP tools see the same database through `agent.db`) and `client`
+(a Flask test client).
 
 | File | Covers |
 |---|---|
 | `tests/test_pure_modules.py` | `home_move` (payments, transfer taxes, PMI), `benefits`, `payroll_validator` |
 | `tests/test_prompts.py` | `agent.prompts`: the generic default profile, and brace escaping for a profile file |
 | `tests/test_setup_wizard.py` | First-run redirect, each setup wizard step's records, skip/done/restart, demo-data mode, the getting-started checklist and empty-state pages (mongomock) |
-| `tests/conftest.py` | Puts the project root on `sys.path` |
+| `tests/test_home_move.py` | `home_move` payment math, temporary buydowns and labels, the reverse price solve with `target_basis`, `compare_buydowns` |
+| `tests/test_card_perks.py` | `benefits.detect_annual_fee` (fee and anniversary month from the statement fee charge), `build_card_perks` never overriding hand-entered values, the benefits page reading a fee charge from a previous year (mongomock), and `suggest_template` matching |
+| `tests/test_agent_read_tools.py` | `recurrence` math, and the agent/MCP read tools: `recurring_items` monthly equivalents, the cash flow outlook's occurrence counts, `portfolio_summary` live values (mongomock, prices mocked) |
+| `tests/test_mcp_writes.py` | MCP write tools against the web app's behaviour: primary-account default, delete skips, override date format, transfers with ledger rows, `biweekly`, debt starting balance and `make_debt_payment` (mongomock) |
+| `tests/test_payroll.py` | Pub 926 FICA/FUTA exemptions, the FICA threshold catch-up and Schedule H line-1 wages (mongomock) |
+| `tests/test_web_fixes.py` | Transfer delete, `/history?year=`, the account `?horizon=` fallback, calendar weekly items and end dates, home-move income excluding archived items (mongomock) |
+| `tests/test_deploy_config.py` | The Dockerfile installs `tzdata` and sets an overridable `TZ`; the Kubernetes ConfigMap documents `TZ` |
+| `tests/conftest.py` | Puts the project root on `sys.path`; shared mongomock fixtures (`app_module`, `db`, `client`) |
 
 Keep new business logic in importable modules with no database dependency
-(as `benefits.py`, `home_move.py` and `payroll_validator.py` are) so it can be
+(as `benefits.py`, `home_move.py`, `recurrence.py` and `payroll_validator.py` are) so it can be
 unit tested here.
 
 ### Continuous integration
@@ -223,7 +235,7 @@ primary input.
 
 `app.py` holds routes and database access. Calculations that do not need the
 database belong in a separate module (`benefits.py`, `home_move.py`,
-`payroll_validator.py`, `payroll_forms.py`) so they can be tested and reused.
+`recurrence.py`, `payroll_validator.py`, `payroll_forms.py`) so they can be tested and reused.
 
 ### One process, in-memory state
 
@@ -273,6 +285,7 @@ models.py                 Data classes and shared constants (categories, account
                           types, goal types, payroll defaults, ...)
 benefits.py               Contribution limits and card perk calculations (pure)
 home_move.py              Home move planner calculations (pure)
+recurrence.py             Recurring-item schedule and monthly-equivalent math (pure)
 payroll_forms.py          IRS PDF filling and EFW2 file generation
 payroll_validator.py      Local EFW2 validation (pure)
 mcp_server.py             Standalone MCP server (read, write and report tools)

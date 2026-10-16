@@ -23,6 +23,8 @@ Each document in `recurring_transactions` is one budget item (model `RecurringTr
 
 ### Frequency values
 
+The schedule lives in `recurrence.py` (`occurrence_dates()`), a pure module shared by the ledger outlook, the calendar, the budget and account pages and the agent/MCP tools, so a frequency means the same thing everywhere.
+
 | Value | Meaning in projections | Uses `day_of_month`? |
 |---|---|---|
 | `weekly` | Every week on the weekday of `start_date` | No |
@@ -33,11 +35,11 @@ Each document in `recurring_transactions` is one budget item (model `RecurringTr
 
 `day_of_month` values larger than the month length are clamped to the last day (31 becomes 30 in April). If the field is empty or unparseable, the 1st is used. Occurrences before `start_date` are dropped.
 
-The add-item form on `/budget` offers all five frequencies and requires `day_of_month`. Note that the MCP write tools (`add_recurring`, `update_recurring`, `add_recurring_transfer` in `agent/tools/writes.py`) only accept `weekly`, `monthly`, `bi-monthly` and `yearly`.
+The add-item form on `/budget` offers all five frequencies and requires `day_of_month`. The MCP write tools (`add_recurring`, `update_recurring`, `add_recurring_transfer` in `agent/tools/writes.py`) accept the same five values (`RECURRING_FREQUENCIES`). `bi-monthly` means every other month, not twice a month; a twice-a-month item is `monthly` with two days, such as `"15,30"`.
 
 ### Monthly equivalent: `calc_monthly_amount()`
 
-`calc_monthly_amount(amount, frequency, day_of_month)` converts one item to a monthly figure. It is used by the budget page, `seed_targets_from_recurring`, the transfers page, account detail pages, investment projections, goal estimates (`_monthly_expense_estimate`, `_monthly_income_estimate`) and the debt plan surplus.
+`calc_monthly_amount(amount, frequency, day_of_month)` (in `recurrence.py`) converts one item to a monthly figure. It is used by the budget page, `seed_targets_from_recurring`, the transfers page, account detail pages, investment projections, goal estimates (`_monthly_expense_estimate`, `_monthly_income_estimate`), the debt plan surplus and the MCP `recurring_items` tool.
 
 Let `days` be the number of comma-separated entries in `day_of_month` (1 when empty):
 
@@ -149,7 +151,7 @@ When the ledger shows that a loan has actually been paid off, the budget lines t
   ACTIVE_RECURRING = {'archived': {'$ne': True}}
   ```
 
-  This includes the budget page, the ledger outlook, the simulator, account detail pages, investment projections, the dashboard's upcoming bills, the calendar, analytics, goal estimates and the debt plan surplus. The agent tools use the same filter literally. When you add a new query over `recurring_transactions`, include it unless you really want archived items.
+  This includes the budget page, the ledger outlook, the simulator, account detail pages, investment projections, the dashboard's upcoming bills, the calendar, analytics, goal estimates, the debt plan surplus and the home move planner's monthly income. The agent tools use the same filter literally. When you add a new query over `recurring_transactions`, include it unless you really want archived items.
 - `/budget` lists archived items in a collapsed "Archived" section with the loan name and payoff date; they can still be deleted there. They do not count toward any total.
 - `budget_page()` calls `_apply_auto_links()` first, so archiving is up to date whenever the page loads.
 
@@ -177,4 +179,4 @@ The debt payoff plan (`POST /debts/plan`, `save_debt_plan`) can maintain a recur
 
 Recurring transfers are managed on `/transfers` (`/transfers/recurring/add`, `/transfers/recurring/edit/<id>`, `/transfers/recurring/delete/<id>`).
 
-Related MCP tools: `budget_status` and `recurring_items` (backed by `get_budget_status` and `get_recurring_items` in `agent/tools/budget.py`), and `set_budget_target`, `add_recurring`, `update_recurring`, `delete_recurring` (backed by `agent/tools/writes.py`). Note that `get_budget_status` compares targets against card spending by transaction `date`, while the budget page uses `statement_date`, and that the agent tools compute monthly equivalents themselves (treating `bi-monthly` as twice a month) instead of calling `calc_monthly_amount()`. See [mcp-server.md](mcp-server.md).
+Related MCP tools: `budget_status` and `recurring_items` (backed by `get_budget_status` and `get_recurring_items` in `agent/tools/budget.py`), and `set_budget_target`, `add_recurring`, `update_recurring`, `delete_recurring` (backed by `agent/tools/writes.py`). Note that `get_budget_status` compares targets against card spending by transaction `date`, while the budget page uses `statement_date`. `get_recurring_items` calls `calc_monthly_amount()`, so its monthly equivalents match the budget page. See [mcp-server.md](mcp-server.md).

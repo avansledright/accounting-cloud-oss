@@ -169,7 +169,7 @@ percent) and `management_type` (`managed` or `self_managed`).
 | `GET/POST /accounts/edit/<id>` | Edit every field. |
 | `POST /accounts/update-balance/<id>` | Set the balance and stamp `balance_as_of_date`. |
 | `POST /accounts/delete/<id>` | Delete an account (does not touch its transactions). |
-| `GET /accounts/<id>` | Detail page with breadcrumbs. Lists recurring items and recurring transfers that touch the account. Cash accounts show an inline 12-month outlook. Investment accounts show a projection chart with a 5, 10, 20 or 30 year horizon (`?horizon=` in months). Self-managed accounts derive their return rate from holdings on each visit (`derive_account_return_rate`). |
+| `GET /accounts/<id>` | Detail page with breadcrumbs. Lists recurring items and recurring transfers that touch the account. Cash accounts show an inline 12-month outlook. Investment accounts show a projection chart with a 5, 10, 20 or 30 year horizon (`?horizon=` in months; a malformed value or one outside 1–600 months falls back to 120). Self-managed accounts derive their return rate from holdings on each visit (`derive_account_return_rate`). |
 | `GET /api/accounts` | JSON list of accounts for dropdowns. |
 
 Investment projections and return-rate derivation are covered in
@@ -185,8 +185,10 @@ create a `transfers` record and two ledger transactions: an expense
 `Transfer to: <description>` on the source account and an income
 `Transfer from: <description>` on the destination. Those transactions are
 what move the money in the ledger. Same-account and non-positive transfers
-are rejected. `POST /transfers/delete/<id>` removes the record and attempts
-to remove both ledger sides.
+are rejected. The MCP `add_transfer` tool writes the same three documents.
+`POST /transfers/delete/<id>` removes the record and both ledger sides,
+matching each side's `account_id` whether it is stored as an `ObjectId` (as
+the `Transaction` model writes it) or as a string (older rows).
 
 **Recurring transfers** (`recurring_transfers`) have a from and to account,
 amount, frequency (`weekly`, `biweekly`, `monthly`, `bi-monthly`, `yearly`),
@@ -412,19 +414,24 @@ Credit card spending analytics live on the credit card page; see
 
 The Bill Calendar is a month grid filled by
 `GET /api/calendar/events?year=YYYY&month=M`, which expands active recurring
-items into dated events (title, amount, type, category, auto-pay flag):
-monthly items on each listed day (clamped to the month's last day, day 1 if
-none), bi-monthly items every other month from the start month, yearly items
-in their start month, and biweekly items every 14 days. Start and end dates
-are respected. Clicking a day shows its events.
+items into dated events (title, amount, type, category, auto-pay flag) with
+`recurrence.occurrence_dates()`, the same schedule the ledger projects:
+weekly items on every start weekday, biweekly items every 14 days from the
+start date, monthly items on each listed day (clamped to the month's last
+day, day 1 if none), bi-monthly items every other month from the start month,
+and yearly items in their start month. Nothing is shown before the start
+date, and each occurrence after `end_date` is dropped, so an item ending
+mid-month shows only its earlier dates. Clicking a day shows its events.
 
 ## History (`/history`)
 
 `history_page()` is a read-only view of closed months: actual transactions
 only, no projections, grouped by month with income, expenses and net. For the
 current year it covers January through two months ago (the previous month is
-still on the ledger). `?year=YYYY` shows all twelve months of a past year. The
-account filter is shared with the ledger.
+still on the ledger), so in January and February the current year is empty.
+`?year=YYYY` shows all twelve months of a past year at any time of year,
+including January and February; a future year shows nothing. The account
+filter is shared with the ledger.
 
 ## Simulation (`/simulation`)
 
@@ -477,7 +484,7 @@ SUTA rate.
 address, hire and termination dates, `pay_type` (`salary` per period or
 `hourly`), pay rate, `pay_frequency` (`PAY_FREQUENCIES`), funding account,
 flat federal and state withholding per period, state override, relationship,
-`lives_with_employer`, `under_18`, active flag.
+`lives_with_employer`, `under_18`, `under_21`, active flag.
 
 **Pay runs** (`GET/POST /payroll/run`; live preview via
 `POST /payroll/preview`): `calculate_payroll()` computes employee Social
@@ -485,8 +492,20 @@ Security (up to the wage base), Medicare, Additional Medicare (over the
 threshold), flat federal and state withholding, and employer Social Security,
 Medicare, FUTA and SUTA (each up to its wage base), plus net pay. FICA only
 applies once the employee's year-to-date cash wages reach
-`fica_annual_threshold`, and relationship or age exemptions from Publication
-926 are applied with notes asking you to verify them. Saving a run stores a
+`fica_annual_threshold`. Once they do, **all** of that year's cash wages are
+subject, not only the part above the threshold: earlier runs that year taxed
+nothing, so the run that crosses the threshold also charges employee and
+employer Social Security and Medicare on the earlier wages, and the entry's
+notes record the catch-up amount. Relationship and age exemptions from
+Publication 926 are applied with notes asking you to verify them:
+
+| Employee | FICA | FUTA |
+|---|---|---|
+| Your child under 21 (relationship `child`, `son` or `daughter`, with `under_21` or `under_18` set) | Exempt | Exempt |
+| Your parent (`parent`, `mother` or `father`) | Exempt (verify the Pub 926 exceptions) | Exempt |
+| Any other employee with `under_18` set | Exempt (verify principal occupation) | Taxed |
+
+Saving a run stores a
 `payroll_entries` document and, if a funding account is set, posts the net pay
 to the ledger as an expense (`Payroll: <name> (<period>)`). Employer taxes are
 tracked on the entry; paying them is a separate transaction.
@@ -500,7 +519,7 @@ employee.
 |---|---|
 | `GET /payroll/w2/<employee_id>/<year>` | W-2 figures for one employee, on screen. |
 | `GET /payroll/w2/<employee_id>/<year>/pdf` | Filled official W-2 PDF. |
-| `GET /payroll/schedule-h/<year>` | Schedule H figures, on screen. |
+| `GET /payroll/schedule-h/<year>` | Schedule H figures, on screen (`_schedule_h_totals`, also used for the PDF and the year-end bundle). Once any run for an employee carried FICA, all of that employee's cash wages for the year count toward the line-1 FICA wages, including runs before the threshold was crossed. |
 | `GET /payroll/schedule-h/<year>/pdf` | Filled Schedule H PDF. |
 | `GET /payroll/efw2/<year>` | `W2_EFW2_<year>.txt` in SSA's EFW2 format, for upload to SSA Business Services Online. |
 | `GET /payroll/validate/<year>` | Runs `payroll_validator.validate_efw2()` against the generated file and lists errors and warnings. |

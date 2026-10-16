@@ -51,13 +51,18 @@ The data sections come from the same `agent/tools` functions that back the
 MCP read tools, so the caveats listed in
 [mcp-server.md](mcp-server.md#read-tools) apply: spending and budget figures
 come from credit card transactions, debt balances are the stored values, and
-the cash flow outlook is a simplified projection rather than the ledger's
-`calculate_yearly_outlook()`.
+the cash flow outlook counts the same recurring occurrence dates as the ledger
+(`recurrence.occurrence_dates()`) but, unlike `calculate_yearly_outlook()`,
+starts from the stored account balance and ignores actual transactions,
+skips, overrides and the loan payoff simulation.
 
-The portfolio report is the only one that fetches live data. It calls Yahoo
-Finance's chart endpoint once per symbol (`_fetch_yahoo_price`, kept in
-`agent/reports.py` to avoid importing `app.py`) and computes market value and
-unrealised gain or loss. If a price fetch fails, that holding is listed as
+The portfolio and monthly reports fetch live prices. Both go through
+`fetch_live_price()` in `agent/tools/portfolio.py` (kept out of `app.py` so
+the MCP server need not import it), which calls Yahoo Finance's chart
+endpoint once per symbol. The monthly report gets them through the
+`portfolio_summary` tool's live market value and gain/loss; the portfolio
+report (`_fetch_yahoo_price` in `agent/reports.py` is an alias for the same
+function) computes market value and unrealised gain or loss per holding. If a price fetch fails, that holding is listed as
 "live price unavailable" and left out of the totals. The prompt tells the
 model to trust live market value over imported cost basis when they disagree.
 See [portfolio.md](portfolio.md) for how holdings and prices work in the app.

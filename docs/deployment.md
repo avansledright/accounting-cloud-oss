@@ -321,7 +321,7 @@ All configuration is through environment variables (in Docker Compose, the
 | `APPLICATION_ROOT` | `/` | web | Sub-path prefix behind a proxy (alternative: `X-Script-Name` header). |
 | `STARTING_BALANCE` | `0` | web | Ledger balance used only until the first account exists. |
 | `FLASK_DEBUG` | `false` | web | Debug mode when running `python app.py`. Never in production. |
-| `TZ` | `UTC` | web, mcp | Time zone for schedules and for "today" in projections. |
+| `TZ` | `UTC` | web, mcp | Time zone for schedules (17:00 price refresh, report scheduler) and for "today" in projections. The image installs `tzdata` and sets `ENV TZ=UTC`, so any IANA zone works (for example `TZ=America/New_York`); without the zoneinfo database a non-UTC value would silently fall back to UTC. `deploy/kubernetes/configmap.yaml` has a commented `TZ` example. |
 | `CC_STATEMENT_DIR` | `./data/cc_statements` | web | Where raw statement CSVs are stored. |
 | `ESCROW_PROPERTY_TAX_MONTHS` | `6,12` | web | Months the escrow simulation pays property tax (annual bill split evenly). |
 | `ESCROW_INSURANCE_MONTH` | `1` | web | Month the escrow simulation pays homeowner's insurance. |

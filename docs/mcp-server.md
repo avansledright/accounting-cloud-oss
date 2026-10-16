@@ -11,7 +11,9 @@ dividends) and two **report tools** that trigger the
 
 It is a separate process from the Flask web app. It talks to the same MongoDB
 database directly and does **not** import `app.py`, so it does not go through
-the web routes. That matters for write tools: see
+the web routes. It does share the pure modules `models.py` (document shapes,
+account types) and `recurrence.py` (recurring-item schedule math) with the web
+app, so a frequency or a default account means the same thing on both sides. That matters for write tools: see
 [Write tools and app side effects](#write-tools-and-app-side-effects).
 
 > **Security warning.** The MCP server has full write access to your financial
@@ -219,11 +221,11 @@ use) plus the ID-listing helpers in `agent/tools/writes.py`.
 | `cc_transactions` | `description=""`, `card=""`, `date_from=""`, `date_to=""`, `category=""`, `limit=20` | Search imported credit card transactions, newest first. `card` matches card name or issuer; `category` is an exact, case-insensitive match. Charges are positive, credits negative. Rows do not include IDs. | `transactions.search_cc_transactions` |
 | `spending_by_category` | `month=""` (`YYYY-MM`, default current) | Credit card spending per category for one month. | `transactions.get_spending_by_category` |
 | `budget_status` | `month=""` (`YYYY-MM`, default current) | Budget targets (default `budget_targets` overlaid with `monthly_budget_targets`) against actual credit card spending per category, with `OK`/`OVER`. | `budget.get_budget_status` |
-| `recurring_items` | `item_type=""` (`expense`/`income`/`transfer`) | Recurring transactions (excluding archived paid-off loan lines) and recurring transfers, with an approximate monthly equivalent. No IDs. | `budget.get_recurring_items` |
+| `recurring_items` | `item_type=""` (`expense`/`income`/`transfer`) | Recurring transactions (excluding archived paid-off loan lines) and recurring transfers, with a monthly equivalent from `recurrence.calc_monthly_amount()`, the same figure the web budget page uses. No IDs. | `budget.get_recurring_items` |
 | `list_recurring` | `item_type=""` (`expense`/`income`/`transfer`) | Recurring transactions and recurring transfers **with IDs**, for the update/delete tools. Includes archived lines. | `writes.list_recurring` |
-| `cash_flow_outlook` | `account_id=""` | 12-month projection: per-month income, expenses, net and ending balance, plus the lowest projected balance. Defaults to the primary account's starting balance. | `cashflow.get_cash_flow_outlook` |
+| `cash_flow_outlook` | `account_id=""` | 12-month projection for one account: per-month income, expenses, net and ending balance, plus the lowest projected balance. With no `account_id` it projects the primary account, starting from that account's stored balance. | `cashflow.get_cash_flow_outlook` |
 | `negative_balance_months` | `account_id=""` | Months whose projected ending balance is below zero (same projection as above). | `cashflow.get_negative_balance_months` |
-| `portfolio_summary` | `account_id=""` | Holding count, total cost basis and YTD dividends, with a per-account breakdown when there is more than one account. Despite the docstring, it reports cost basis, not live market value. | `portfolio.get_portfolio_summary` |
+| `portfolio_summary` | `account_id=""` | Live market value (Yahoo price × quantity via `portfolio.fetch_live_price`), total cost basis, unrealized gain/loss, YTD dividends and holding count, with a per-account breakdown (market value and cost basis) when there is more than one account. Holdings without a live quote are left out of the market value and the gain/loss, and the output says how many were excluded; with no quotes at all it reports the market value as unavailable. | `portfolio.get_portfolio_summary` |
 | `holdings` | `account_id=""` | Holdings with symbol, quantity, cost basis and account name. No IDs. | `portfolio.get_holdings` |
 | `list_holdings` | `account_id=""` | Holdings **with IDs** (symbol, quantity, account ID). | `writes.list_holdings_with_ids` |
 | `dividend_history` | `symbol=""`, `limit=20` | Recent dividend payments, newest first, with a total. | `portfolio.get_dividend_history` |
@@ -244,14 +246,26 @@ Notes on how the read tools differ from the web pages:
   (`_decorate_debt`, `_decorate_asset_liability` in `app.py`). The MCP tools
   `debts`, `total_debt`, `list_debts`, `list_assets` and `current_net_worth`
   read the stored field directly, so they can differ from the Debts and Net
-  Worth pages once payments are linked.
+  Worth pages once payments are linked. A payment logged with
+  `make_debt_payment` therefore lowers the balance on the Debts page but not
+  in these tools.
 - **The cash flow tools use a simplified projection** (`_generate_outlook` in
   `agent/tools/cashflow.py`), not the ledger's `calculate_yearly_outlook()`.
-  It counts recurring items per month by frequency (weekly as 4, monthly as
-  the number of listed days), ignores actual transactions, skips, per-date
-  overrides and loan payoff capping, and only applies recurring transfers when
-  an `account_id` is given. Treat it as a rough outlook; the ledger page is
+  The schedule is the same: each recurring item and recurring transfer counts
+  the occurrence dates `recurrence.occurrence_dates()` returns for the month
+  (so weekly, biweekly, split-day monthly, every-other-month bi-monthly and
+  yearly items land exactly as on the ledger), items are active from their
+  start date until a month that begins after their end date, archived loan
+  lines are excluded, and an item or the tool call with no `account_id` means
+  the primary account. What it still leaves out: actual transactions (the
+  start is the account's stored balance), the dedup of actuals against
+  projections, skips, per-date overrides and the loan payoff simulation.
+  Treat it as an outlook of the recurring schedule; the ledger page is
   authoritative. See [ledger-projections.md](ledger-projections.md).
+- **`portfolio_summary` fetches prices live** on every call (one Yahoo request
+  per symbol, no cache and no Alpha Vantage fallback), so it is slower than
+  the other read tools and can report fewer priced holdings than the
+  Portfolio page when Yahoo is unavailable.
 - **Budget and category spending come from credit card transactions only**
   (`cc_transactions`), not the ledger. See [budget.md](budget.md) and
   [credit-cards.md](credit-cards.md).
@@ -270,25 +284,25 @@ these tools cannot set a field to zero or clear it.
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `add_transaction` | `description`, `amount` (> 0), `date`, `transaction_type` (`income`/`expense`), `account_id=""` | Inserts one document into `transactions`. Validates the type, date, positive amount and that the account exists. With no `account_id` the document is stored with `account_id: null`, which the app treats as the primary account. |
+| `add_transaction` | `description`, `amount` (> 0), `date`, `transaction_type` (`income`/`expense`), `account_id=""` | Inserts one document into `transactions`, built with the `Transaction` model (so `account_id` is stored as an `ObjectId`). Validates the type, date, positive amount and that the account exists. With no `account_id` it stores the primary account's ID, as the web form does. |
 | `update_transaction` | `transaction_id`, `description=""`, `amount=0`, `date=""`, `transaction_type=""`, `account_id=""` | `$set` on the given fields only. Validates type and account. |
-| `delete_transaction` | `transaction_id` | Deletes the document permanently. |
+| `delete_transaction` | `transaction_id` | Upserts a `skipped_transactions` entry (description and `YYYY-MM-DD` date) so the projected occurrence the transaction stood in for does not reappear, then deletes the document. |
 
 #### Recurring items
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `add_recurring` | `description`, `amount`, `frequency` (`weekly`/`monthly`/`bi-monthly`/`yearly`), `start_date`, `transaction_type` (`income`/`expense`), `category=""`, `day_of_month=""` (`"1"` or `"1,15"`), `account_id=""`, `auto_pay=false`, `payment_method=""`, `notes=""` | Inserts a budget item into `recurring_transactions` with `end_date: null`. |
-| `update_recurring` | `recurring_id`, `description=""`, `amount=0`, `frequency=""`, `category=""`, `day_of_month=""`, `account_id=""` | `$set` on the given fields only. |
+| `add_recurring` | `description`, `amount`, `frequency` (`weekly`/`biweekly`/`monthly`/`bi-monthly`/`yearly`), `start_date`, `transaction_type` (`income`/`expense`), `category=""`, `day_of_month=""` (`"1"` or `"1,15"`), `account_id=""`, `auto_pay=false`, `payment_method=""`, `notes=""` | Inserts a budget item into `recurring_transactions` with `end_date: null`. Frequencies follow `recurrence.py`: `biweekly` is every 14 days from the start date, `bi-monthly` is every other month (not twice a month; a twice-a-month item is `monthly` with `day_of_month` `"15,30"`). |
+| `update_recurring` | `recurring_id`, `description=""`, `amount=0`, `frequency=""`, `category=""`, `day_of_month=""`, `account_id=""` | `$set` on the given fields only. Accepts the same frequencies as `add_recurring`. |
 | `delete_recurring` | `recurring_id` | Deletes the budget item. |
-| `override_recurring_amount` | `recurring_id`, `date`, `amount` | Upserts a `projected_overrides` document for one occurrence. |
+| `override_recurring_amount` | `recurring_id`, `date`, `amount` | Upserts a `projected_overrides` document for one occurrence, keyed by `recurring_id` and the date as a `YYYY-MM-DD` string (the form the web route stores and `calculate_yearly_outlook()` looks up). |
 
 #### Transfers
 
 | Tool | Arguments | What it does |
 |---|---|---|
-| `add_transfer` | `from_account_id`, `to_account_id`, `amount`, `date`, `description=""` (default `Account Transfer`), `notes=""` | Inserts one document into `transfers`. Both accounts must exist. |
-| `add_recurring_transfer` | `from_account_id`, `to_account_id`, `amount`, `frequency` (`weekly`/`monthly`/`bi-monthly`/`yearly`), `start_date`, `day_of_month=""`, `description=""` (default `Recurring Transfer`) | Inserts into `recurring_transfers`. |
+| `add_transfer` | `from_account_id`, `to_account_id`, `amount`, `date`, `description=""` (default `Account Transfer`), `notes=""` | Inserts the `transfers` document plus two ledger transactions, `Transfer to: <description>` (expense on the source) and `Transfer from: <description>` (income on the destination), which is what moves money between accounts on the ledger. Both accounts must exist and differ, and the amount must be positive. |
+| `add_recurring_transfer` | `from_account_id`, `to_account_id`, `amount`, `frequency` (`weekly`/`biweekly`/`monthly`/`bi-monthly`/`yearly`), `start_date`, `day_of_month=""`, `description=""` (default `Recurring Transfer`) | Inserts into `recurring_transfers`. |
 | `delete_recurring_transfer` | `transfer_id` | Deletes a recurring transfer. |
 
 #### Accounts
@@ -306,8 +320,8 @@ these tools cannot set a field to zero or clear it.
 | `add_asset` | `name`, `asset_type` (`real_estate`/`vehicle`/`other`), `estimated_value`, `liability_balance=0`, `interest_rate=0`, `monthly_payment=0`, `address=""`, `notes=""` | Inserts an asset with an optional attached loan. Fields such as `payment_match`, escrow and `payment_frequency` are not set; edit them in the web UI. |
 | `update_asset` | `asset_id`, `estimated_value=0`, `liability_balance=0`, `monthly_payment=0` | Updates the given fields; `0` leaves a field unchanged. |
 | `add_debt` | `name`, `debt_type` (`credit_card`/`personal_loan`/`student_loan`/`medical`/`other`), `balance`, `interest_rate=0`, `minimum_payment=0`, `creditor=""`, `notes=""` | Inserts a debt. Deferment, `subsidized` and `payment_match` are not settable here. |
-| `update_debt_balance` | `debt_id`, `balance` | Overwrites the stored `balance`. |
-| `make_debt_payment` | `debt_id`, `amount` | Subtracts `amount` from the stored `balance` (floored at 0). |
+| `update_debt_balance` | `debt_id`, `balance` | Sets the debt's **starting** balance (the stored `balance`, the web edit form's "Starting Balance"). The current balance is still derived from linked ledger payments. Do not use it to record a payment. |
+| `make_debt_payment` | `debt_id`, `amount` (> 0), `date=""` (default today), `account_id=""` (default primary account), `description=""` (default `Extra Debt Payment`, `models.EXTRA_DEBT_PAYMENT_DESC`) | Logs the payment as a ledger expense tagged with `debt_id`, like the web app's log-payment. The starting balance is left alone; the current balance drops because linked payments are amortized against it. The default description matches the payoff plan's recurring extra-payment line, so the outlook dedups that month's projected extra; pass the loan's regular budget-line description for a scheduled payment. |
 
 #### Budget targets and goals
 
@@ -330,27 +344,29 @@ these tools cannot set a field to zero or clear it.
 ### Write tools and app side effects
 
 The write tools insert and update documents directly. They **do not** run the
-extra bookkeeping the web routes perform. In particular, **no MCP tool changes
-an account balance as a side effect.** That is also true of the web app's own
-transaction routes: the stored `balance` is a base figure and the ledger
-computes current balances by adding transactions on top. The table lists
-where the MCP tool and the equivalent web route differ.
+extra bookkeeping the web routes perform unless the table says so. In
+particular, **no MCP tool changes an account balance as a side effect.** That
+is also true of the web app's own transaction routes: the stored `balance` is
+a base figure and the ledger computes current balances by adding transactions
+on top. The table lists where the MCP tool mirrors the equivalent web route
+and where it still differs.
 
 | Tool | Equivalent web route | Mirrors the app? | Differences |
 |---|---|---|---|
-| `add_transaction` | `POST /transactions` | Partly | The web route stores the primary account's ID when none is given. MCP stores `null`, which the ledger and history treat as the primary account, but the dashboard's Month to Date card matches the primary account's ID exactly and skips it; pass `account_id` explicitly to avoid that. The web route also calls `_auto_link_transaction()` so a description matching a loan's `payment_match` is tagged as a loan payment. MCP does not, but the next visit to the dashboard, ledger, debts or goals page runs `_apply_auto_links()` and links unlinked expense transactions anyway. |
+| `add_transaction` | `POST /transactions` | Mostly | Both default to the primary account's ID. The web route also calls `_auto_link_transaction()` so a description matching a loan's `payment_match` is tagged as a loan payment. MCP does not, but the next visit to the dashboard, ledger, debts or goals page runs `_apply_auto_links()` and links unlinked expense transactions anyway. |
 | `update_transaction` | `POST /transactions/edit/<id>` | Yes | The web form cannot change the account; MCP can. |
-| `delete_transaction` | `DELETE /transactions/<id>` | No | The web route also records the description and date in `skipped_transactions` so the projected recurring occurrence the transaction realized does not reappear. MCP only deletes, so the projection for that date can come back. |
-| `add_recurring` / `update_recurring` | `/budget/add`, `/budget/edit/<id>` | Mostly | MCP rejects `biweekly` (every 14 days), which the web forms offer, and does not verify that `account_id` exists. |
+| `delete_transaction` | `DELETE /transactions/<id>` | Yes | Both record the description and date in `skipped_transactions` before deleting. |
+| `add_recurring` / `update_recurring` | `/budget/add`, `/budget/edit/<id>` | Mostly | Same frequency list, including `biweekly`. MCP does not verify that `account_id` exists. |
 | `delete_recurring` | `POST /budget/delete/<id>` | Yes | |
-| `override_recurring_amount` | `POST /projected/update-amount` | **No** | The web route stores the override's `date` as an ISO string, and `calculate_yearly_outlook()` looks overrides up by that string. MCP stores a datetime, so the override is saved but does not affect the ledger projection. |
-| `add_transfer` | `POST /transfers/add` | **No** | The web route also inserts two ledger transactions (`Transfer to: ...` on the source, `Transfer from: ...` on the destination), which is what moves money between accounts in the ledger. MCP only records the `transfers` document, so the transfer appears in the history but does not change either account's ledger balance. It also does not reject same-account transfers. |
+| `override_recurring_amount` | `POST /projected/update-amount` | Yes | Both store the date as a `YYYY-MM-DD` string. `calculate_yearly_outlook()` also normalizes a datetime `date`, so overrides written by older MCP versions still apply. |
+| `add_transfer` | `POST /transfers/add` | Yes | Both insert the transfer and the paired `Transfer to:` / `Transfer from:` ledger rows, and reject same-account transfers and non-positive amounts. |
 | `add_recurring_transfer` | `POST /transfers/recurring/add` | Mostly | MCP does not check that the accounts exist or differ, or that the amount is positive. |
 | `delete_recurring_transfer` | `POST /transfers/recurring/delete/<id>` | Yes | |
 | `add_account` / `update_account` / `update_account_balance` | `/accounts/add`, `/accounts/edit/<id>`, `/accounts/update-balance/<id>` | Yes | Primary demotion matches the web forms. |
 | `add_asset` / `update_asset` | `/assets/add`, `/assets/edit/<id>` | Partly | Only a subset of fields. |
 | `add_debt` | `POST /debts/add` | Partly | Only a subset of fields. |
-| `update_debt_balance` / `make_debt_payment` | none | **Different model** | The app treats `balance` as the starting balance and derives the current balance from linked ledger payments. These tools edit the starting balance and create no ledger transaction, so if payments are also linked the payment is counted twice. To record a real payment the app's way, add an expense transaction whose description matches the debt's `payment_match`. |
+| `update_debt_balance` | `/debts/edit/<id>` (Starting Balance) | Yes | Only the balance field. |
+| `make_debt_payment` | `POST /debts/plan/log-payment` | Yes | Both post a ledger expense linked to the loan (`debt_id`; the web route uses `asset_liability_id` when its target is an asset loan) with the `Extra Debt Payment` description and leave the starting balance alone. The web route always pays the payoff plan's current target, dated today, from the plan's cash account (else the primary account); MCP takes any `debt_id` and an optional date, account and description. |
 | `set_budget_target` | `/budget/targets`, `/budget/targets/template` | Yes | |
 | `add_goal` / `update_goal_amount` / `delete_goal` | `/goals/add`, `/goals/contribute/<id>`, `/goals/delete/<id>` | Partly | Manual goals only; `update_goal_amount` sets rather than increments. |
 | `add_holding` / `update_holding` / `delete_holding` | `/portfolio/add`, `/portfolio/update/<id>`, `/portfolio/delete/<id>` | Yes | |
