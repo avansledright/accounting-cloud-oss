@@ -32,6 +32,24 @@
         </div>
     </div>
 
+    <!-- Setup Section -->
+    <div class="admin-section">
+        <h2>Setup &amp; Getting Started</h2>
+        <p>Walk through the setup wizard again (existing data is kept; the account step edits your primary
+           account), or bring back the getting-started checklist on the dashboard.</p>
+        <div class="export-buttons">
+            <form method="POST" action="{{ url_for('setup_restart') }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="action-btn edit-btn" style="height:auto;padding:0.5rem 1rem;">Re-run setup wizard</button>
+            </form>
+            <form method="POST" action="{{ url_for('setup_checklist_dismiss') }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="show" value="1">
+                <button type="submit" class="action-btn" style="height:auto;padding:0.5rem 1rem;background:#6c757d;color:#fff;">Show getting-started checklist</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Database Statistics Section -->
     <div class="admin-section">
         <h2>Database Statistics</h2>

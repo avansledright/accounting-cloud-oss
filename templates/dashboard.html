@@ -2,7 +2,30 @@
 
 {% block content %}
 <h1 style="margin-bottom:0.25rem;">Dashboard</h1>
-<p style="color:#6c757d; margin-top:0;">{{ today.strftime('%A, %B %d, %Y') }}</p>
+<p style="color:#6c757d; margin-top:0;">{% if household_name %}{{ household_name }} &middot; {% endif %}{{ today.strftime('%A, %B %d, %Y') }}</p>
+
+{% if show_checklist %}
+<div class="getting-started" id="getting-started">
+    <div class="getting-started-head">
+        <h2>Getting started</h2>
+        <span class="dashboard-card-meta">{{ checklist_done }} of {{ checklist|length }} done</span>
+        <span class="spacer"></span>
+        <form method="POST" action="{{ url_for('setup_checklist_dismiss') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="gs-dismiss">Hide checklist</button>
+        </form>
+    </div>
+    <div class="getting-started-progress"><span style="width:{{ (100 * checklist_done / checklist|length)|round|int }}%;"></span></div>
+    <ul>
+        {% for item in checklist %}
+        <li class="{{ 'done' if item.done else '' }}">
+            <span class="gs-check">{% if item.done %}&#10003;{% endif %}</span>
+            <span><a href="{{ item.url }}">{{ item.label }}</a><small>{{ item.hint }}</small></span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
 
 {% if cashflow_warnings %}
 <div style="background:#fff3cd; border:1px solid #ffc107; border-radius:6px; padding:0.75rem 1rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; gap:1rem;">

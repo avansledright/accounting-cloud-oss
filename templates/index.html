@@ -17,6 +17,32 @@
 {% block content %}
     <h1>Yearly Financial Outlook</h1>
 
+    {% if not filtered_mode %}
+    {% set all_outlook_txns = yearly_outlook | map(attribute='transactions') | sum(start=[]) %}
+    {% if not primary_account_id %}
+    <div class="empty-state empty-state-guide">
+        <h3>No primary account yet</h3>
+        <p>The ledger tracks one <strong>primary</strong> cash account (usually checking) and projects its
+           balance 12 months ahead from your recurring income and bills. Add that account and tick
+           "Primary Account", or let the setup wizard walk you through it.</p>
+        <div class="empty-actions">
+            <a href="{{ url_for('setup_step', step='welcome') }}" class="action-btn verify-btn" style="height:auto;padding:0.5rem 1rem;">Run the setup wizard</a>
+            <a href="{{ url_for('accounts_page') }}#add-account" class="action-btn edit-btn" style="height:auto;padding:0.5rem 1rem;">Add an account</a>
+        </div>
+    </div>
+    {% elif not all_outlook_txns %}
+    <div class="empty-state empty-state-guide">
+        <h3>Nothing to project yet</h3>
+        <p>Projections come from <strong>recurring items</strong>: paychecks, rent, utilities and other
+           scheduled money. Add them on the Budget page and they appear here month by month. Record
+           actual transactions with the Add Transaction panel at the bottom of the page.</p>
+        <div class="empty-actions">
+            <a href="{{ url_for('budget_page') }}#add-budget-item" class="action-btn verify-btn" style="height:auto;padding:0.5rem 1rem;">Add recurring income and bills</a>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
     <!-- Transaction Filter Bar -->
     <div class="filter-bar">
         <div class="transfer-header" id="filter-toggle">

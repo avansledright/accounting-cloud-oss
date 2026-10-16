@@ -4088,3 +4088,78 @@ tr:hover {
     vertical-align: middle;
     cursor: default;
 }
+
+/* ========================================
+   FIRST-RUN SETUP WIZARD + GETTING STARTED
+   ======================================== */
+.setup-wizard { max-width: 1000px; }
+.setup-steps {
+    list-style: none; padding: 0; margin: 0 0 1rem;
+    display: flex; flex-wrap: wrap; gap: 0.5rem;
+}
+.setup-steps li {
+    display: flex; align-items: center; gap: 0.4rem;
+    padding: 0.35rem 0.75rem; border-radius: 999px;
+    background: #e9ecef; color: #6c757d; font-size: 0.9rem;
+}
+.setup-steps li a { color: inherit; text-decoration: none; }
+.setup-steps li.complete { background: #d4edda; color: #155724; }
+.setup-steps li.current { background: #007bff; color: #fff; font-weight: 600; }
+.setup-step-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.4rem; height: 1.4rem; border-radius: 50%;
+    background: rgba(0,0,0,0.08); font-size: 0.8rem;
+}
+.setup-errors {
+    background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24;
+    border-radius: 6px; padding: 0.75rem 1rem; margin-bottom: 1rem;
+}
+.setup-errors ul { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+.setup-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+.data-entry .setup-actions form { display: inline; }
+.data-entry button.setup-secondary { background-color: #6c757d; }
+.data-entry button.setup-secondary:hover { background-color: #5a6268; }
+.data-entry button.setup-link-btn,
+a.setup-link-btn {
+    background: none; border: none; color: #007bff; padding: 0.5rem 0;
+    text-decoration: underline; cursor: pointer; font-size: 0.95rem;
+}
+.data-entry button.setup-link-btn:hover { background: none; color: #0056b3; }
+a.setup-primary-link {
+    display: inline-block; background: #28a745; color: #fff; text-decoration: none;
+    padding: 0.6rem 1.2rem; border-radius: 4px; font-weight: 600;
+}
+a.setup-primary-link:hover { background: #218838; }
+.setup-alt { background: #f8f9fa; }
+.setup-row { border-bottom: 1px dashed #dee2e6; padding-bottom: 0.75rem; }
+.setup-rows .form-group.setup-narrow { flex: 0 1 120px; min-width: 100px; }
+.setup-existing { margin-bottom: 0.5rem; }
+.setup-next li { margin-bottom: 0.4rem; }
+
+.getting-started {
+    background: #fff; border-left: 4px solid #007bff; border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+}
+.getting-started-head { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.getting-started-head h2 { margin: 0; font-size: 1.1rem; }
+.getting-started-head .spacer { flex: 1; }
+.getting-started-progress { height: 6px; background: #e9ecef; border-radius: 3px; margin: 0.6rem 0; overflow: hidden; }
+.getting-started-progress span { display: block; height: 100%; background: #28a745; }
+.getting-started ul { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.5rem 1.25rem; }
+.getting-started li { display: flex; gap: 0.5rem; align-items: flex-start; }
+.getting-started li .gs-check {
+    flex: 0 0 1.2rem; height: 1.2rem; border-radius: 50%; border: 2px solid #adb5bd;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; margin-top: 0.1rem;
+}
+.getting-started li.done .gs-check { background: #28a745; border-color: #28a745; color: #fff; }
+.getting-started li.done a { color: #6c757d; text-decoration: line-through; }
+.getting-started li small { display: block; color: #6c757d; font-size: 0.8rem; }
+.getting-started form { display: inline; }
+.getting-started .gs-dismiss { background: none; border: none; color: #6c757d; cursor: pointer; font-size: 0.85rem; text-decoration: underline; }
+
+.empty-state-guide { text-align: left; max-width: 640px; margin: 1rem auto; }
+.empty-state-guide h3 { margin-top: 0; color: #343a40; }
+.empty-state-guide .empty-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem; }

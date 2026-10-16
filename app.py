@@ -1180,9 +1180,372 @@ def save_dashboard_layout():
     return jsonify({'ok': True})
 
 
+# ============ FIRST-RUN SETUP ============
+#
+# A fresh install (no accounts, setup never finished or skipped) sends the
+# dashboard to a short wizard. State lives in the `app_settings` singleton:
+#   setup_completed / setup_skipped  -- either one stops the redirect
+#   household_name                   -- shown on the dashboard
+#   checklist_dismissed              -- hides the getting-started card
+
+SETUP_STEPS = [
+    ('welcome', 'Welcome'),
+    ('account', 'Primary account'),
+    ('income', 'Income'),
+    ('bills', 'Bills'),
+    ('extras', 'Extras'),
+    ('done', 'Done'),
+]
+_SETUP_STEP_KEYS = [k for k, _ in SETUP_STEPS]
+
+# Frequencies offered by the wizard. 'twice_monthly' is stored as a monthly
+# item with two days (e.g. "1,15"), the same way the Budget page does it.
+SETUP_INCOME_FREQUENCIES = [
+    ('biweekly', 'Every 2 weeks'),
+    ('twice_monthly', 'Twice a month'),
+    ('monthly', 'Monthly'),
+    ('weekly', 'Weekly'),
+]
+SETUP_BILL_FREQUENCIES = [
+    ('monthly', 'Monthly'),
+    ('yearly', 'Yearly'),
+    ('bi-monthly', 'Every 2 months'),
+    ('weekly', 'Weekly'),
+    ('biweekly', 'Every 2 weeks'),
+]
+SETUP_BILL_SUGGESTIONS = [
+    ('Rent / Mortgage', 'Housing'),
+    ('Electric', 'Utilities'),
+    ('Internet', 'Utilities'),
+    ('Phone', 'Phone'),
+    ('Car insurance', 'Insurance'),
+]
+
+
+def _app_settings():
+    return db.app_settings.find_one({'_id': 'app'}) or {}
+
+
+def _save_app_settings(**fields):
+    fields['updated_at'] = datetime.now()
+    db.app_settings.update_one({'_id': 'app'}, {'$set': fields}, upsert=True)
+
+
+def needs_first_run_setup():
+    """True for a fresh install: setup never finished/skipped and no accounts."""
+    s = _app_settings()
+    if s.get('setup_completed') or s.get('setup_skipped'):
+        return False
+    return db.accounts.count_documents({}) == 0
+
+
+def _today_dt():
+    """Today at midnight as a datetime (BSON has no date type)."""
+    return datetime.combine(date.today(), datetime.min.time())
+
+
+def _next_on_or_after(anchor, step_days, floor):
+    """First date in anchor + k*step_days (k may be negative) that is >= floor."""
+    if anchor >= floor:
+        return anchor
+    steps = -(-(floor - anchor).days // step_days)  # ceil
+    return anchor + timedelta(days=steps * step_days)
+
+
+def _setup_schedule(frequency, when, second_day=None):
+    """Turn a wizard row (frequency + next date) into budget-item fields.
+
+    The balance entered in the wizard is "as of today", so nothing may project
+    before today: monthly items start today (their day(s) of month carry the
+    schedule) and weekly/bi-weekly items are re-anchored on their next
+    occurrence on or after today, keeping the cadence. Yearly and bi-monthly
+    items keep the given date as the anchor month.
+    Returns (frequency, day_of_month, start_date).
+    """
+    today = _today_dt()
+    if frequency in ('weekly', 'biweekly'):
+        step = 7 if frequency == 'weekly' else 14
+        start = _next_on_or_after(when, step, today)
+        # The day is informational (the start date anchors the cadence) but
+        # the Budget edit form requires one.
+        return frequency, str(start.day), start
+    if frequency == 'twice_monthly':
+        days = sorted({when.day, int(second_day)})
+        return 'monthly', ','.join(str(d) for d in days), today
+    if frequency in ('yearly', 'bi-monthly'):
+        start = when
+        while start < today:
+            start += relativedelta(years=1) if frequency == 'yearly' else relativedelta(months=2)
+        return frequency, str(when.day), start
+    return 'monthly', str(when.day), today
+
+
+def _setup_rows(prefix, fields):
+    """Collect parallel `prefix-field[]` form lists into row dicts."""
+    cols = {f: request.form.getlist(f'{prefix}_{f}') for f in fields}
+    n = max((len(v) for v in cols.values()), default=0)
+    rows = []
+    for i in range(n):
+        rows.append({f: (cols[f][i].strip() if i < len(cols[f]) else '') for f in fields})
+    return rows
+
+
+def _parse_amount(raw):
+    try:
+        value = float((raw or '').replace(',', '').replace('$', ''))
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _parse_iso_date(raw):
+    try:
+        return datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def _setup_primary():
+    return db.accounts.find_one({'is_primary': True})
+
+
+def _setup_summary():
+    primary = _setup_primary()
+    income = list(db.recurring_transactions.find({'transaction_type': 'income', **ACTIVE_RECURRING}))
+    bills = list(db.recurring_transactions.find({'transaction_type': 'expense', **ACTIVE_RECURRING}))
+    monthly_income = sum(calc_monthly_amount(r.get('amount', 0), r.get('frequency'), r.get('day_of_month')) for r in income)
+    monthly_bills = sum(calc_monthly_amount(r.get('amount', 0), r.get('frequency'), r.get('day_of_month')) for r in bills)
+    others = list(db.accounts.find({'is_primary': {'$ne': True}}))
+    debts = list(db.debts.find())
+    return {
+        'primary': primary,
+        'income': income,
+        'bills': bills,
+        'monthly_income': monthly_income,
+        'monthly_bills': monthly_bills,
+        'other_accounts': others,
+        'debts': debts,
+    }
+
+
+def getting_started_checklist():
+    """Getting-started items, each ticked off from real data."""
+    has_income = db.recurring_transactions.count_documents({'transaction_type': 'income'}) > 0
+    has_bills = db.recurring_transactions.count_documents({'transaction_type': 'expense'}) > 0
+    items = [
+        ('Add your primary account', db.accounts.count_documents({'is_primary': True}) > 0,
+         url_for('accounts_page') + '#add-account', 'The checking account your bills come out of; the ledger projects its balance.'),
+        ('Add recurring income', has_income, url_for('budget_page'),
+         'Paychecks and other regular income, so projections know what comes in.'),
+        ('Add recurring bills', has_bills, url_for('budget_page'),
+         'Rent or mortgage, utilities, insurance: anything on a schedule.'),
+        ('Set budget targets', (db.budget_targets.count_documents({}) + db.monthly_budget_targets.count_documents({})) > 0,
+         url_for('budget_page') + '#budget-targets', 'Monthly spending targets per category (groceries, dining, ...).'),
+        ('Record or import a transaction', db.transactions.count_documents({}) > 0,
+         url_for('ledger_page'), 'Log what actually happened; it replaces the matching projection.'),
+        ('Import a credit card statement', db.cc_transactions.count_documents({}) > 0,
+         url_for('credit_cards_page'), 'Upload a CSV from your card issuer to see where the money goes.'),
+        ('Take a net worth snapshot', db.networth_snapshots.count_documents({}) > 0,
+         url_for('networth_page'), 'Snapshots build the net worth history chart over time.'),
+    ]
+    return [{'label': l, 'done': d, 'url': u, 'hint': h} for l, d, u, h in items]
+
+
+@app.route('/setup')
+def setup_start():
+    return redirect(url_for('setup_step', step='welcome'))
+
+
+@app.route('/setup/<step>', methods=['GET', 'POST'])
+def setup_step(step):
+    if step not in _SETUP_STEP_KEYS:
+        return redirect(url_for('setup_step', step='welcome'))
+    errors = []
+    settings = _app_settings()
+
+    if request.method == 'POST':
+        if step == 'welcome':
+            _save_app_settings(household_name=(request.form.get('household_name') or '').strip()[:80] or None,
+                               setup_started_at=settings.get('setup_started_at') or datetime.now())
+            return redirect(url_for('setup_step', step='account'))
+
+        if step == 'account':
+            name = (request.form.get('name') or '').strip()
+            institution = (request.form.get('institution') or '').strip()
+            account_type = request.form.get('account_type') or 'checking'
+            balance = _form_float('balance', 0.0)
+            if account_type not in CASH_ACCOUNT_TYPES:
+                errors.append('Choose a cash account type.')
+            if not name:
+                errors.append('Give the account a name.')
+            if not errors:
+                primary = _setup_primary()
+                if primary:
+                    # Re-running setup (or stepping back) edits the primary
+                    # account instead of creating a duplicate.
+                    db.accounts.update_one({'_id': primary['_id']}, {'$set': {
+                        'name': name, 'institution': institution, 'account_type': account_type,
+                        'balance': balance, 'balance_as_of_date': _today_dt()}})
+                else:
+                    _create_account(name=name, account_type=account_type, institution=institution,
+                                    balance=balance, is_primary=True, balance_as_of_date=_today_dt())
+                return redirect(url_for('setup_step', step='income'))
+
+        if step in ('income', 'bills'):
+            primary = _setup_primary()
+            if not primary:
+                return redirect(url_for('setup_step', step='account'))
+            is_income = step == 'income'
+            fields = ['description', 'amount', 'frequency', 'date', 'second_day', 'category', 'auto_pay']
+            allowed = dict(SETUP_INCOME_FREQUENCIES if is_income else SETUP_BILL_FREQUENCIES)
+            categories = INCOME_CATEGORIES if is_income else CATEGORIES
+            to_create = []
+            for i, row in enumerate(_setup_rows(step, fields), start=1):
+                if not row['description'] and not row['amount']:
+                    continue  # blank row
+                amount = _parse_amount(row['amount'])
+                when = _parse_iso_date(row['date'])
+                label = row['description'] or f'Row {i}'
+                if not row['description']:
+                    errors.append(f'Row {i}: add a description.')
+                if amount is None:
+                    errors.append(f'{label}: enter an amount greater than zero.')
+                if when is None:
+                    errors.append(f'{label}: pick the next {"payday" if is_income else "due date"}.')
+                if row['frequency'] not in allowed:
+                    errors.append(f'{label}: choose how often it repeats.')
+                second = None
+                if row['second_day']:
+                    try:
+                        second = int(row['second_day'])
+                        if not 1 <= second <= 31:
+                            raise ValueError
+                    except ValueError:
+                        errors.append(f'{label}: the second payday must be a day of the month (1-31).')
+                if row['frequency'] == 'twice_monthly' and second is None:
+                    errors.append(f'{label}: twice-a-month pay needs the second payday (day of month).')
+                if errors:
+                    continue
+                frequency, day_of_month, start = _setup_schedule(row['frequency'], when, second)
+                to_create.append(dict(
+                    description=row['description'], amount=amount, frequency=frequency,
+                    start_date=start, transaction_type='income' if is_income else 'expense',
+                    day_of_month=day_of_month,
+                    category=row['category'] if row['category'] in categories else (categories[0] if is_income else 'Other'),
+                    auto_pay=(row['auto_pay'] == 'on'), account_id=str(primary['_id']),
+                ))
+            if not errors:
+                for fields_ in to_create:
+                    _create_recurring_item(**fields_)
+                nxt = 'bills' if is_income else 'extras'
+                if request.form.get('action') == 'add_more':
+                    nxt = step
+                return redirect(url_for('setup_step', step=nxt))
+
+        if step == 'extras':
+            kind = request.form.get('kind')
+            if kind == 'account':
+                name = (request.form.get('name') or '').strip()
+                account_type = request.form.get('account_type')
+                if not name or account_type not in dict(ACCOUNT_TYPES):
+                    errors.append('An extra account needs a name and a type.')
+                else:
+                    is_inv = account_type in INVESTMENT_ACCOUNT_TYPES
+                    _create_account(name=name, account_type=account_type,
+                                    institution=(request.form.get('institution') or '').strip(),
+                                    balance=_form_float('balance', 0.0), is_primary=False,
+                                    balance_as_of_date=_today_dt(),
+                                    estimated_return_rate=_form_float('estimated_return_rate') if is_inv else None)
+                    return redirect(url_for('setup_step', step='extras'))
+            elif kind == 'debt':
+                name = (request.form.get('name') or '').strip()
+                debt_type = request.form.get('debt_type')
+                if not name or debt_type not in dict(DEBT_TYPES):
+                    errors.append('A debt needs a name and a type.')
+                else:
+                    _create_debt(name=name, debt_type=debt_type, balance=_form_float('balance', 0.0),
+                                 interest_rate=_form_float('interest_rate', 0.0),
+                                 minimum_payment=_form_float('minimum_payment', 0.0),
+                                 creditor=(request.form.get('creditor') or '').strip() or None)
+                    return redirect(url_for('setup_step', step='extras'))
+            else:
+                return redirect(url_for('setup_step', step='done'))
+
+    if step == 'done' and request.method == 'GET':
+        _save_app_settings(setup_completed=True, setup_completed_at=datetime.now(), setup_skipped=False)
+
+    primary = _setup_primary()
+    if step in ('income', 'bills') and not primary:
+        return redirect(url_for('setup_step', step='account'))
+
+    outlook = []
+    if step == 'done' and primary:
+        outlook = calculate_yearly_outlook(start_balance=primary.get('balance', 0),
+                                           account_filter=str(primary['_id']), max_months_back=0)[:3]
+
+    return render_template('setup.html',
+                           step=step,
+                           steps=SETUP_STEPS,
+                           step_index=_SETUP_STEP_KEYS.index(step),
+                           errors=errors,
+                           form=request.form,
+                           settings=_app_settings(),
+                           summary=_setup_summary(),
+                           outlook=outlook,
+                           server_tz=time.strftime('%Z'),
+                           today=date.today(),
+                           primary_account_types=[(k, l) for k, l in ACCOUNT_TYPES if k in CASH_ACCOUNT_TYPES],
+                           extra_account_types=[(k, l) for k, l in ACCOUNT_TYPES if k != 'checking'],
+                           debt_types=DEBT_TYPES,
+                           income_frequencies=SETUP_INCOME_FREQUENCIES,
+                           bill_frequencies=SETUP_BILL_FREQUENCIES,
+                           bill_suggestions=SETUP_BILL_SUGGESTIONS,
+                           categories=CATEGORIES,
+                           income_categories=INCOME_CATEGORIES,
+                           first_run=needs_first_run_setup()), (400 if errors else 200)
+
+
+@app.route('/setup/skip', methods=['POST'])
+def setup_skip():
+    _save_app_settings(setup_skipped=True)
+    return redirect(url_for('index'))
+
+
+@app.route('/setup/demo', methods=['POST'])
+def setup_demo():
+    """Load the fake demo household instead of entering real data."""
+    import demo_data
+    try:
+        demo_data.load_demo_data(db)
+    except demo_data.DemoDataRefused:
+        return render_template('setup.html', step='welcome', steps=SETUP_STEPS, step_index=0,
+                               errors=['Demo data can only be loaded into an empty database (no accounts yet).'],
+                               form={}, settings=_app_settings(), summary=_setup_summary(), outlook=[],
+                               server_tz=time.strftime('%Z'), today=date.today(),
+                               first_run=needs_first_run_setup()), 400
+    _save_app_settings(setup_completed=True, setup_completed_at=datetime.now(), demo_data=True,
+                       household_name=_app_settings().get('household_name') or 'Demo household')
+    return redirect(url_for('index'))
+
+
+@app.route('/setup/restart', methods=['POST'])
+def setup_restart():
+    """Admin: walk the wizard again. Existing data is kept; step 2 edits the primary account."""
+    db.app_settings.update_one({'_id': 'app'}, {'$unset': {'setup_completed': '', 'setup_skipped': ''}}, upsert=True)
+    return redirect(url_for('setup_step', step='welcome'))
+
+
+@app.route('/setup/checklist/dismiss', methods=['POST'])
+def setup_checklist_dismiss():
+    _save_app_settings(checklist_dismissed=request.form.get('show') != '1')
+    return redirect(url_for('index'))
+
+
 @app.route('/')
 def index():
     """Primary dashboard — high-signal financial snapshot."""
+    if needs_first_run_setup():
+        return redirect(url_for('setup_step', step='welcome'))
     _apply_auto_links()
     today = date.today()
     today_dt = datetime.combine(today, datetime.min.time())
@@ -1330,8 +1693,16 @@ def index():
         'benefit_alerts': bool(benefit_alerts),
     }
 
+    app_settings = _app_settings()
+    checklist = getting_started_checklist()
+    show_checklist = not app_settings.get('checklist_dismissed') and not all(i['done'] for i in checklist)
+
     return render_template('dashboard.html',
                            today=today,
+                           household_name=app_settings.get('household_name'),
+                           checklist=checklist,
+                           show_checklist=show_checklist,
+                           checklist_done=sum(1 for i in checklist if i['done']),
                            dashboard_layout=dashboard_layout,
                            card_available=card_available,
                            primary_name=primary_name,
@@ -2336,7 +2707,7 @@ def budget_page():
 @app.route('/budget/add', methods=['POST'])
 def add_budget_item():
     data = request.form
-    new_transaction = RecurringTransaction(
+    _create_recurring_item(
         description=data['description'],
         amount=float(data['amount']),
         frequency=data['frequency'],
@@ -2351,7 +2722,6 @@ def add_budget_item():
         payment_method=data.get('payment_method'),
         account_id=data.get('account_id') or None
     )
-    db.recurring_transactions.insert_one(new_transaction.__dict__)
     return redirect(url_for('budget_page'))
 
 @app.route('/budget/edit/<item_id>', methods=['GET', 'POST'])
@@ -2487,14 +2857,36 @@ def accounts_page():
                            summary=summary)
 
 
+def _create_account(**fields):
+    """Insert an Account; a new primary account demotes any existing one.
+
+    Shared by the Accounts page and the setup wizard. Returns the new id.
+    """
+    if fields.get('is_primary'):
+        db.accounts.update_many({}, {'$set': {'is_primary': False}})
+    account = Account(**fields)
+    db.accounts.insert_one(account.__dict__)
+    return account._id
+
+
+def _create_recurring_item(**fields):
+    """Insert a RecurringTransaction (budget item). Shared by Budget and setup."""
+    item = RecurringTransaction(**fields)
+    db.recurring_transactions.insert_one(item.__dict__)
+    return item._id
+
+
+def _create_debt(**fields):
+    """Insert a Debt. Shared by the Debts page and the setup wizard."""
+    debt = Debt(**fields)
+    db.debts.insert_one(debt.__dict__)
+    return debt._id
+
+
 @app.route('/accounts/add', methods=['POST'])
 def add_account():
     data = request.form
     is_primary = data.get('is_primary') == 'on'
-
-    # If this is set as primary, unset any existing primary
-    if is_primary:
-        db.accounts.update_many({}, {'$set': {'is_primary': False}})
 
     # Parse investment-specific fields
     estimated_return_rate = None
@@ -2505,7 +2897,7 @@ def add_account():
         balance_as_of_date = datetime.fromisoformat(data['balance_as_of_date'])
     management_type = data.get('management_type') or None
 
-    new_account = Account(
+    _create_account(
         name=data['name'],
         account_type=data['account_type'],
         institution=data['institution'],
@@ -2517,7 +2909,6 @@ def add_account():
         balance_as_of_date=balance_as_of_date,
         management_type=management_type,
     )
-    db.accounts.insert_one(new_account.__dict__)
     return redirect(url_for('accounts_page'))
 
 
@@ -4073,7 +4464,7 @@ def debts_page():
 @app.route('/debts/add', methods=['POST'])
 def add_debt():
     data = request.form
-    new_debt = Debt(
+    _create_debt(
         name=data['name'],
         debt_type=data['debt_type'],
         balance=float(data.get('balance', 0)),
@@ -4086,7 +4477,6 @@ def add_debt():
         subsidized=bool(data.get('subsidized')),
         payment_match=_parse_payment_match(data.get('payment_match'))
     )
-    db.debts.insert_one(new_debt.__dict__)
     return redirect(url_for('debts_page'))
 
 

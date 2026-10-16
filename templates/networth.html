@@ -34,6 +34,10 @@
     <!-- Net Worth Chart -->
     <div class="data-entry">
         <h2>Net Worth Over Time</h2>
+        {% if not snapshots %}
+        <p class="empty-state" style="padding:1rem;">No snapshots yet. Use <strong>Take Snapshot Now</strong> above
+           once a month (for example after updating account balances) and this chart fills in over time.</p>
+        {% endif %}
         <div class="chart-container">
             <canvas id="networthChart"></canvas>
         </div>

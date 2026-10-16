@@ -19,10 +19,9 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
       - name: Compile all modules
-        run: python -m compileall -q app.py models.py benefits.py home_move.py mcp_server.py payroll_forms.py payroll_validator.py agent scripts
+        run: python -m compileall -q app.py models.py demo_data.py benefits.py home_move.py mcp_server.py payroll_forms.py payroll_validator.py agent scripts
       - name: Unit tests
         run: pytest -q tests
 
@@ -39,7 +38,10 @@ jobs:
       - name: Health check and page smoke test (empty database)
         run: |
           curl -fsS http://127.0.0.1:5052/health
-          for p in / /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /tools/home-move /analytics /calendar /reports /admin /payroll /transfers; do
+          # A fresh install sends the dashboard to the setup wizard.
+          loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://127.0.0.1:5052/)
+          echo "/ -> $loc"; case "$loc" in */setup/welcome) ;; *) exit 1 ;; esac
+          for p in /setup/welcome /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /tools/home-move /analytics /calendar /reports /admin /payroll /transfers; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5052$p")
             echo "$code $p"; [ "$code" = 200 ]
           done

@@ -17,6 +17,21 @@
 {% block content %}
     <h1>Budget Management</h1>
 
+    {% if not recurring_transactions %}
+    <div class="empty-state empty-state-guide">
+        <h3>Start with your recurring items</h3>
+        <p>A <strong>budget item</strong> is something that repeats on a schedule: a paycheck, rent,
+           the electric bill. Each one feeds the ledger projection on its account (the primary account
+           unless you pick another). Add them with the form below, then set monthly
+           <strong>targets</strong> for everyday categories such as groceries and dining in the
+           Category Breakdown table.</p>
+        <div class="empty-actions">
+            <a href="#add-budget-item" class="action-btn verify-btn" style="height:auto;padding:0.5rem 1rem;">Add a budget item</a>
+            <a href="#budget-targets" class="action-btn edit-btn" style="height:auto;padding:0.5rem 1rem;">Set targets</a>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Summary Cards -->
     <div class="summary-cards">
         <div class="summary-card income">
@@ -53,7 +68,7 @@
     </div>
 
     <!-- Category Breakdown with Budget Targets -->
-    <div class="data-entry">
+    <div class="data-entry" id="budget-targets">
         <h2>Category Breakdown & Targets</h2>
         <form method="POST" action="{{ url_for('set_budget_targets') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -121,7 +136,7 @@
     </div>
 
     <!-- Add Budget Item Form -->
-    <div class="data-entry">
+    <div class="data-entry" id="add-budget-item">
         <h2>Add Budget Item</h2>
         <form method="POST" action="{{ url_for('add_budget_item') }}" class="budget-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

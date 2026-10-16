@@ -1,0 +1,361 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="setup-wizard">
+    <h1>Set up Accounting Cloud</h1>
+
+    <ol class="setup-steps">
+        {% for key, label in steps %}
+        <li class="{{ 'current' if loop.index0 == step_index else ('complete' if loop.index0 < step_index else '') }}">
+            {% if loop.index0 < step_index and key != 'done' %}
+            <a href="{{ url_for('setup_step', step=key) }}"><span class="setup-step-num">{{ loop.index }}</span> {{ label }}</a>
+            {% else %}
+            <span class="setup-step-num">{{ loop.index }}</span> {{ label }}
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ol>
+
+    {% if errors %}
+    <div class="setup-errors" role="alert">
+        <strong>Please fix the following:</strong>
+        <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------------ #}
+    {% if step == 'welcome' %}
+    <div class="data-entry">
+        <h2>Welcome</h2>
+        <p>Accounting Cloud keeps a ledger of your main checking account and projects
+           its balance 12 months ahead from your recurring income and bills. This
+           wizard sets up the basics in about five minutes: one account, your pay,
+           and your regular bills. Everything can be changed later.</p>
+        <form method="POST" action="{{ url_for('setup_step', step='welcome') }}" class="account-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="household_name">Household or display name (optional):</label>
+                    <input type="text" id="household_name" name="household_name" maxlength="80"
+                           placeholder="e.g., The Example Household" value="{{ form.get('household_name') or settings.household_name or '' }}">
+                    <span class="form-help">Shown on your dashboard. Stays in your own database.</span>
+                </div>
+                <div class="form-group">
+                    <label>Time zone:</label>
+                    <input type="text" value="{{ server_tz }} (today is {{ today.strftime('%b %d, %Y') }})" disabled>
+                    <span class="form-help">"Today" and schedules use the server's time zone. Change it with <code>TZ</code> in <code>.env</code> (e.g. <code>TZ=America/New_York</code>) and restart.</span>
+                </div>
+            </div>
+            <div class="setup-actions">
+                <button type="submit">Start setup &rarr;</button>
+            </div>
+        </form>
+    </div>
+
+    {% if first_run %}
+    <div class="data-entry setup-alt">
+        <h2>Just looking around?</h2>
+        <p>Load a fake demo household (invented names, banks and numbers) to see every
+           page filled in. Only works on an empty database. To start over with your own
+           data later, reset the database (see <code>docs/getting-started.md</code>).</p>
+        <div class="setup-actions">
+            <form method="POST" action="{{ url_for('setup_demo') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="setup-secondary">Load demo data instead</button>
+            </form>
+            <form method="POST" action="{{ url_for('setup_skip') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="setup-link-btn">Skip setup, I'll explore on my own</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    {# ------------------------------------------------------------------ #}
+    {% elif step == 'account' %}
+    {% set p = summary.primary %}
+    <div class="data-entry">
+        <h2>Your primary account</h2>
+        <p>This is the <strong>primary account</strong>: the checking account your pay lands in and
+           your bills come out of. The ledger and the dashboard project <em>its</em> balance, and
+           budget items without an account default to it. You can add savings and investment
+           accounts in a later step.</p>
+        {% if p %}<p class="form-help">You already have a primary account; saving here updates it.</p>{% endif %}
+        <form method="POST" action="{{ url_for('setup_step', step='account') }}" class="account-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Account name:</label>
+                    <input type="text" id="name" name="name" required placeholder="e.g., Main Checking"
+                           value="{{ form.get('name') or (p.name if p else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="institution">Bank or credit union:</label>
+                    <input type="text" id="institution" name="institution" placeholder="e.g., Example Bank"
+                           value="{{ form.get('institution') or (p.institution if p else '') }}">
+                </div>
+                <div class="form-group">
+                    <label for="account_type">Type:</label>
+                    {% set cur_type = form.get('account_type') or (p.account_type if p else 'checking') %}
+                    <select id="account_type" name="account_type">
+                        {% for value, label in primary_account_types %}
+                        <option value="{{ value }}" {% if value == cur_type %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="balance">Current balance:</label>
+                    <input type="number" id="balance" name="balance" step="0.01" placeholder="0.00"
+                           value="{{ form.get('balance') or (p.balance if p else '') }}">
+                    <span class="form-help">What your bank shows today. Projections start from it.</span>
+                </div>
+            </div>
+            <div class="setup-actions">
+                <a href="{{ url_for('setup_step', step='welcome') }}" class="setup-link-btn">&larr; Back</a>
+                <button type="submit">Save and continue &rarr;</button>
+            </div>
+        </form>
+    </div>
+
+    {# ------------------------------------------------------------------ #}
+    {% elif step in ('income', 'bills') %}
+    {% set is_income = step == 'income' %}
+    {% set existing = summary.income if is_income else summary.bills %}
+    <div class="data-entry">
+        <h2>{{ 'Recurring income' if is_income else 'Recurring bills' }}</h2>
+        {% if is_income %}
+        <p>Add each regular paycheck or other income that lands in
+           <strong>{{ summary.primary.name }}</strong>. Use the take-home amount (after taxes and
+           deductions). These are <strong>recurring items</strong>: rules that generate projected
+           transactions, not money already received.</p>
+        {% else %}
+        <p>Add the bills that come out of <strong>{{ summary.primary.name }}</strong> on a schedule.
+           Leave rows blank to ignore them. Day-to-day spending (groceries, dining) is better
+           handled with budget targets later, not as bills.</p>
+        {% endif %}
+
+        {% if existing %}
+        <table class="account-table compact setup-existing">
+            <thead><tr><th>Already added</th><th>Amount</th><th>Schedule</th></tr></thead>
+            <tbody>
+            {% for r in existing %}
+            <tr><td>{{ r.description }}</td><td>${{ r.amount|usd }}</td>
+                <td>{{ r.frequency }}{% if r.day_of_month %} on day {{ r.day_of_month }}{% endif %}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <p class="form-help">Edit or delete these on the <a href="{{ url_for('budget_page') }}">Budget</a> page.</p>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('setup_step', step=step) }}" class="account-form setup-rows-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="setup-rows">
+                {% set n_rows = 2 if is_income else bill_suggestions|length %}
+                {% for i in range(n_rows) %}
+                {% set sugg = bill_suggestions[i] if (not is_income and i < bill_suggestions|length and not existing) else none %}
+                <div class="form-row setup-row">
+                    <div class="form-group">
+                        <label>Description</label>
+                        <input type="text" name="{{ step }}_description" maxlength="80"
+                               placeholder="{{ ('e.g., Paycheck' if i == 0 else 'e.g., Partner paycheck') if is_income else (sugg[0] if sugg else 'e.g., Gym') }}">
+                    </div>
+                    <div class="form-group setup-narrow">
+                        <label>Amount</label>
+                        <input type="number" name="{{ step }}_amount" step="0.01" min="0" placeholder="0.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Category</label>
+                        <select name="{{ step }}_category">
+                            {% for cat in (income_categories if is_income else categories) %}
+                            <option value="{{ cat }}" {% if (sugg and sugg[1] == cat) %}selected{% endif %}>{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>How often</label>
+                        <select name="{{ step }}_frequency" class="setup-freq">
+                            {% for value, label in (income_frequencies if is_income else bill_frequencies) %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>{{ 'Next payday' if is_income else 'Next due date' }}</label>
+                        <input type="date" name="{{ step }}_date">
+                    </div>
+                    {% if is_income %}
+                    <div class="form-group setup-narrow setup-second-day">
+                        <label>2nd payday (day)</label>
+                        <input type="number" name="{{ step }}_second_day" min="1" max="31" placeholder="e.g., 15">
+                    </div>
+                    <input type="hidden" name="{{ step }}_auto_pay" value="">
+                    {% else %}
+                    <input type="hidden" name="{{ step }}_second_day" value="">
+                    <div class="form-group setup-narrow">
+                        <label>Auto-pay</label>
+                        <select name="{{ step }}_auto_pay"><option value="">No</option><option value="on">Yes</option></select>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <p class="form-help">
+                {% if is_income %}"Every 2 weeks" and "Weekly" repeat from the next payday. "Twice a month" uses the
+                next payday's day plus the 2nd payday (e.g. the 1st and 15th).{% else %}Monthly bills repeat on the
+                due date's day of the month; yearly bills repeat in the due date's month.{% endif %}
+                Nothing is projected before today, because your balance already reflects it.
+            </p>
+            <div class="setup-actions">
+                <a href="{{ url_for('setup_step', step='account' if is_income else 'income') }}" class="setup-link-btn">&larr; Back</a>
+                <button type="submit" name="action" value="add_more" class="setup-secondary">Save and add more</button>
+                <button type="submit" name="action" value="next">Save and continue &rarr;</button>
+            </div>
+            <p class="form-help">Nothing to add? Leave every row blank and continue.</p>
+        </form>
+    </div>
+
+    {# ------------------------------------------------------------------ #}
+    {% elif step == 'extras' %}
+    <div class="data-entry">
+        <h2>Optional extras</h2>
+        <p>Add savings or investment accounts and debts now, or skip this and add them later
+           from the full pages. Only the primary account drives the ledger; the others count toward
+           net worth, goals and investment projections.</p>
+
+        {% if summary.other_accounts or summary.debts %}
+        <table class="account-table compact setup-existing">
+            <thead><tr><th>Added</th><th>Type</th><th>Balance</th></tr></thead>
+            <tbody>
+            {% for a in summary.other_accounts %}<tr><td>{{ a.name }}</td><td>{{ a.account_type }}</td><td>${{ a.balance|usd }}</td></tr>{% endfor %}
+            {% for d in summary.debts %}<tr><td>{{ d.name }}</td><td>{{ d.debt_type }} (debt)</td><td>${{ d.balance|usd }}</td></tr>{% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <h3>Add an account</h3>
+        <form method="POST" action="{{ url_for('setup_step', step='extras') }}" class="account-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="kind" value="account">
+            <div class="form-row">
+                <div class="form-group"><label for="x_name">Name</label>
+                    <input type="text" id="x_name" name="name" placeholder="e.g., Emergency Savings" required></div>
+                <div class="form-group"><label for="x_type">Type</label>
+                    <select id="x_type" name="account_type">
+                        {% for value, label in extra_account_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select></div>
+                <div class="form-group"><label for="x_inst">Institution</label>
+                    <input type="text" id="x_inst" name="institution" placeholder="e.g., Example Brokerage"></div>
+                <div class="form-group setup-narrow"><label for="x_bal">Balance</label>
+                    <input type="number" id="x_bal" name="balance" step="0.01" placeholder="0.00"></div>
+                <div class="form-group setup-narrow"><label for="x_rate">Est. return %</label>
+                    <input type="number" id="x_rate" name="estimated_return_rate" step="0.1" placeholder="investments only"></div>
+            </div>
+            <div class="setup-actions"><button type="submit" class="setup-secondary">Add account</button></div>
+        </form>
+
+        <h3>Add a debt</h3>
+        <p class="form-help">Credit card balances you carry, student or personal loans. Mortgages and car
+           loans belong on <a href="{{ url_for('assets_page') }}">Assets</a>, attached to the house or car.</p>
+        <form method="POST" action="{{ url_for('setup_step', step='extras') }}" class="account-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="kind" value="debt">
+            <div class="form-row">
+                <div class="form-group"><label for="d_name">Name</label>
+                    <input type="text" id="d_name" name="name" placeholder="e.g., Student Loan" required></div>
+                <div class="form-group"><label for="d_type">Type</label>
+                    <select id="d_type" name="debt_type">
+                        {% for value, label in debt_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select></div>
+                <div class="form-group"><label for="d_cred">Lender</label>
+                    <input type="text" id="d_cred" name="creditor" placeholder="optional"></div>
+                <div class="form-group setup-narrow"><label for="d_bal">Balance</label>
+                    <input type="number" id="d_bal" name="balance" step="0.01" placeholder="0.00"></div>
+                <div class="form-group setup-narrow"><label for="d_apr">APR %</label>
+                    <input type="number" id="d_apr" name="interest_rate" step="0.01" placeholder="0"></div>
+                <div class="form-group setup-narrow"><label for="d_min">Min. payment</label>
+                    <input type="number" id="d_min" name="minimum_payment" step="0.01" placeholder="0.00"></div>
+            </div>
+            <div class="setup-actions"><button type="submit" class="setup-secondary">Add debt</button></div>
+        </form>
+
+        <p class="form-help">More options (recurring transfers to savings, houses and cars with loans, holdings)
+           live on <a href="{{ url_for('accounts_page') }}">Accounts</a>, <a href="{{ url_for('transfers_page') }}">Transfers</a>,
+           <a href="{{ url_for('assets_page') }}">Assets</a>, <a href="{{ url_for('debts_page') }}">Debts</a> and
+           <a href="{{ url_for('portfolio_page') }}">Portfolio</a>.</p>
+
+        <form method="POST" action="{{ url_for('setup_step', step='extras') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="setup-actions">
+                <a href="{{ url_for('setup_step', step='bills') }}" class="setup-link-btn">&larr; Back</a>
+                <button type="submit">Finish &rarr;</button>
+            </div>
+        </form>
+    </div>
+
+    {# ------------------------------------------------------------------ #}
+    {% elif step == 'done' %}
+    <div class="data-entry">
+        <h2>You're set up{% if settings.household_name %}, {{ settings.household_name }}{% endif %}</h2>
+        <div class="summary-cards">
+            <div class="summary-card">
+                <span class="summary-label">{{ summary.primary.name if summary.primary else 'Primary account' }}</span>
+                <span class="summary-amount">${{ (summary.primary.balance if summary.primary else 0)|usd }}</span>
+            </div>
+            <div class="summary-card income">
+                <span class="summary-label">Income / month</span>
+                <span class="summary-amount">${{ summary.monthly_income|usd }}</span>
+                <span>{{ summary.income|length }} item{{ '' if summary.income|length == 1 else 's' }}</span>
+            </div>
+            <div class="summary-card expenses">
+                <span class="summary-label">Bills / month</span>
+                <span class="summary-amount">${{ summary.monthly_bills|usd }}</span>
+                <span>{{ summary.bills|length }} item{{ '' if summary.bills|length == 1 else 's' }}</span>
+            </div>
+        </div>
+
+        {% if outlook %}
+        <h3>Projected balance</h3>
+        <table class="account-table compact">
+            <thead><tr><th>Month</th><th>End balance</th><th>Lowest point</th></tr></thead>
+            <tbody>
+            {% for m in outlook %}
+            <tr><td>{{ m.month }}</td>
+                <td class="{{ 'negative-balance' if m.balance < 0 else '' }}">${{ m.balance|usd }}</td>
+                <td class="{{ 'negative-balance' if (m.min_balance or 0) < 0 else '' }}">${{ (m.min_balance or 0)|usd }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <h3>What to do next</h3>
+        <ul class="setup-next">
+            <li><a href="{{ url_for('ledger_page') }}">Open the ledger</a>: see the 12-month projection, then mark
+                projected items as paid (or record what actually happened) as the month goes on.</li>
+            <li><a href="{{ url_for('budget_page') }}#budget-targets">Set budget targets</a> for day-to-day categories
+                such as groceries and dining.</li>
+            <li><a href="{{ url_for('credit_cards_page') }}">Import a credit card statement</a> (CSV) to see spending by category.</li>
+            <li><a href="{{ url_for('portfolio_page') }}">Add investment holdings</a> for live prices, dividends and projections.</li>
+            <li><a href="{{ url_for('networth_page') }}">Take a net worth snapshot</a>; repeat monthly to build the history chart.</li>
+            <li>Connect an AI assistant with the MCP server: see <code>docs/mcp-server.md</code>.</li>
+        </ul>
+        <p class="form-help">You can walk through this wizard again from <a href="{{ url_for('admin_page') }}">Admin</a>.
+           A getting-started checklist on the dashboard tracks the rest.</p>
+        <div class="setup-actions">
+            <a href="{{ url_for('index') }}" class="setup-primary-link">Go to the dashboard &rarr;</a>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+// Show the "2nd payday" field only for twice-a-month income rows.
+document.querySelectorAll('.setup-row').forEach(function (row) {
+    var freq = row.querySelector('.setup-freq');
+    var second = row.querySelector('.setup-second-day');
+    if (!freq || !second) return;
+    function sync() { second.style.visibility = freq.value === 'twice_monthly' ? 'visible' : 'hidden'; }
+    freq.addEventListener('change', sync);
+    sync();
+});
+</script>
+{% endblock %}

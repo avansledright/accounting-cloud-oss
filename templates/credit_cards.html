@@ -36,6 +36,17 @@
 {% block content %}
     <h1>Credit Card Statements</h1>
 
+    {% if not all_cards %}
+    <div class="empty-state empty-state-guide">
+        <h3>Import your first statement</h3>
+        <p>Download a statement as CSV from your card issuer's website (Chase, Citi and American
+           Express formats are recognised; "Other" handles a generic date/description/amount file).
+           Add the card under <strong>Your Cards</strong> in the Upload Statement panel, then upload the CSV.
+           Transactions are de-duplicated and categorised automatically, and feed the
+           "CC Actual" column on the Budget page.</p>
+    </div>
+    {% endif %}
+
     <!-- Missing Statements (surfaced at the top so it's clear what needs uploading) -->
     {% if missing_statements %}
     <div class="data-entry" style="border-left: 4px solid #dc3545; background: #fff5f5;">
