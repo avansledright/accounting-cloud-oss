@@ -646,7 +646,7 @@ PAY_FREQUENCIES = [
 
 
 class HouseholdEmployee:
-    """A household employee (nanny, caregiver, etc.) paid by the user as household employer."""
+    """A household employee (caregiver, housekeeper, etc.) paid by the user as household employer."""
     def __init__(self, name, ssn=None, address=None, hire_date=None,
                  termination_date=None, pay_type='salary', pay_rate=0,
                  pay_frequency='monthly', funding_account_id=None,
