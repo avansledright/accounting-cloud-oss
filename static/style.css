@@ -3704,6 +3704,11 @@ tr:hover {
 .hm-table .hm-subtotal td { font-weight: 600; background: #f8f9fa; }
 .hm-table .hm-total td { font-weight: 700; border-top: 2px solid #1a1a2e; border-bottom: none; font-size: 0.95rem; }
 .hm-table .neg td:last-child, .hm-table tr.neg td { color: #c62828; }
+.hm-buydown-compare { margin-bottom: 1rem; overflow-x: auto; }
+.hm-buydown-compare .hm-table th { text-align: right; font-size: 0.75rem; color: #6c757d; font-weight: 600; padding: 0.35rem 0.2rem; white-space: nowrap; }
+.hm-buydown-compare .hm-table th:first-child { text-align: left; }
+.hm-buydown-compare .hm-table td:not(:first-child) { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hm-buydown-compare small { display: block; margin-top: 0.5rem; color: #6c757d; font-size: 0.75rem; }
 .hm-bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; margin-top: 0.8rem; font-size: 0.65rem; color: #fff; }
 .hm-bar span { display: flex; align-items: center; justify-content: center; overflow: hidden; white-space: nowrap; }
 .hm-amort { font-size: 0.85rem; margin-top: 0; }

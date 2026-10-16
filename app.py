@@ -5464,6 +5464,7 @@ def home_move_page():
     has_input = bool(params['purchase_price'] or params['sale_price'] or params['target_payment'])
     result = None
     solved_price = None
+    buydown_compare = None
     if has_input:
         income = _home_move_monthly_income()
         if params['solve_for'] == 'payment' and params['target_payment'] > 0:
@@ -5472,6 +5473,8 @@ def home_move_page():
                 params['purchase_price'] = solved_price
             else:
                 result = home_move.calculate_home_move(params, rates, income)
+            if params['target_basis'] == 'year1':
+                buydown_compare = home_move.compare_buydowns(params, rates, income)
         else:
             result = home_move.calculate_home_move(params, rates, income)
 
@@ -5483,7 +5486,7 @@ def home_move_page():
     return render_template('home_move.html', params=params, result=result, rates=rates,
                            homes=homes, scenarios=scenarios, loan_types=home_move.LOAN_TYPES,
                            active_scenario=str(scenario['_id']) if scenario else None,
-                           solved_price=solved_price,
+                           solved_price=solved_price, buydown_compare=buydown_compare,
                            defaults=home_move.DEFAULTS)
 
 

@@ -51,6 +51,7 @@ DEFAULTS = {
     'purchase_price': 0.0,
     'solve_for': 'price',             # 'price' (normal) | 'payment' (reverse: solve price from target payment)
     'target_payment': 0.0,            # desired total monthly (PITI + HOA) when solve_for == 'payment'
+    'target_basis': 'note',           # which payment the target means: 'note' (year 3+) | 'year1' (with buydown)
     'down_mode': 'pct',               # 'pct' | 'amount' | 'proceeds'
     'down_payment_pct': 20.0,
     'down_payment_amount': 0.0,
@@ -161,7 +162,8 @@ def parse_params(source):
     p = {}
     for key, default in DEFAULTS.items():
         raw = source.get(key)
-        if key in ('down_mode', 'loan_type', 'tax_mode', 'insurance_mode', 'closing_date', 'buydown_payer', 'solve_for'):
+        if key in ('down_mode', 'loan_type', 'tax_mode', 'insurance_mode', 'closing_date', 'buydown_payer', 'solve_for',
+                   'target_basis'):
             p[key] = raw if raw else default
         elif default is None:
             p[key] = _f(raw, None) if raw not in (None, '') else None
@@ -171,6 +173,8 @@ def parse_params(source):
             p[key] = _f(raw, default)
     if p['loan_type'] not in LOAN_TYPES:
         p['loan_type'] = 'fixed30'
+    if p['target_basis'] not in ('note', 'year1'):
+        p['target_basis'] = 'note'
     return p
 
 
@@ -204,7 +208,7 @@ def temporary_buydown(principal, note_rate_pct, term_months, year1_pts, year2_pt
         pmt = payment_for(principal, reduced_rate, term_months)
         years.append({'year': yr, 'pts': pts, 'rate': reduced_rate, 'payment': pmt, 'monthly_saving': full - pmt})
         cost += (full - pmt) * 12
-    label = ('-'.join(f"{y['pts']:g}" for y in years) + '-0') if years else 'none'
+    label = f"{year1_pts or 0:g}-{year2_pts or 0:g}" if years else 'none'  # '2-1', '1-0'
     return {'years': years, 'cost': cost, 'full_payment': full, 'label': label}
 
 
@@ -353,10 +357,15 @@ def calculate_home_move(p, rates=None, monthly_income=None):
 
     pmi_monthly = loan * p['pmi_rate_pct'] / 100 / 12 if ltv > 80 and loan > 0 else 0.0
     piti = pi + tax_m + ins_m + pmi_monthly + hoa_m
+    buydown = temporary_buydown(loan, rate, term, p['buydown_year1'], p['buydown_year2'])
+    # Total payment year by year: reduced years first, then the note rate.
+    by_year = [{'label': f"Year {y['year']}", 'rate': y['rate'], 'total': piti - y['monthly_saving']}
+               for y in buydown['years']]
+    by_year.append({'label': f"Year {len(by_year) + 1}+" if by_year else 'Every year',
+                    'rate': rate, 'total': piti})
 
     # Buyer closing costs
     points = loan * p['points_pct'] / 100
-    buydown = temporary_buydown(loan, rate, term, p['buydown_year1'], p['buydown_year2'])
     buydown_buyer_cost = buydown['cost'] if (buydown['cost'] and p['buydown_payer'] == 'buyer') else 0.0
     prepaid_interest = loan * rate / 100 / 365 * prepaid_days
 
@@ -453,7 +462,8 @@ def calculate_home_move(p, rates=None, monthly_income=None):
         },
         'monthly': {
             'pi': pi, 'tax': tax_m, 'insurance': ins_m, 'pmi': pmi_monthly, 'hoa': hoa_m,
-            'total': piti, 'tax_annual': tax_annual, 'insurance_annual': ins_annual,
+            'total': piti, 'first_year_total': by_year[0]['total'], 'by_year': by_year,
+            'tax_annual': tax_annual, 'insurance_annual': ins_annual,
             'current': current, 'delta': delta, 'annual_delta': delta * 12 if delta is not None else None,
             'income': monthly_income, 'housing_ratio': ratio,
         },
@@ -468,8 +478,10 @@ def calculate_home_move(p, rates=None, monthly_income=None):
 def solve_price_for_payment(p, rates=None, monthly_income=None, max_price=20_000_000):
     """
     Reverse calculator: find the purchase price whose total monthly payment
-    (PITI + HOA, at the note rate) equals p['target_payment'], holding every
-    other input fixed (rate, loan type, down-payment mode, sale side, etc.).
+    (PITI + HOA) equals p['target_payment'], holding every other input fixed
+    (rate, loan type, down-payment mode, buydown, sale side, etc.).
+    target_basis 'note' matches the note-rate payment (year 3+); 'year1'
+    matches the first-year payment, which is lower when a buydown applies.
     Total payment is monotonic in price, so bisection converges quickly.
     Returns (price, result) or (None, None) if the target is unreachable.
     """
@@ -480,7 +492,8 @@ def solve_price_for_payment(p, rates=None, monthly_income=None, max_price=20_000
 
     def total_at(price):
         q = dict(p, purchase_price=price)
-        return calculate_home_move(q, rates, monthly_income)['monthly']['total']
+        m = calculate_home_move(q, rates, monthly_income)['monthly']
+        return m['first_year_total'] if p.get('target_basis') == 'year1' else m['total']
 
     lo, hi = 0.0, float(max_price)
     if total_at(hi) < target:
@@ -498,3 +511,30 @@ def solve_price_for_payment(p, rates=None, monthly_income=None, max_price=20_000
         return None, None
     q = dict(p, purchase_price=price)
     return price, calculate_home_move(q, rates, monthly_income)
+
+
+BUYDOWN_OPTIONS = ((0, 0), (1, 0), (2, 1))
+
+
+def compare_buydowns(p, rates=None, monthly_income=None, options=BUYDOWN_OPTIONS):
+    """
+    For the target payment, solve the affordable price under each buydown
+    (none, 1-0, 2-1), with the target applied to the first-year payment.
+    Shows how far a buydown stretches the budget and what it costs later:
+    the payment still steps up to the note-rate figure after it ends.
+    """
+    rates = rates or fetch_mortgage_rates()
+    rows = []
+    for y1, y2 in options:
+        q = dict(p, buydown_year1=y1, buydown_year2=y2, target_basis='year1')
+        price, r = solve_price_for_payment(q, rates, monthly_income)
+        if not price:
+            continue
+        b, m = r['purchase'], r['monthly']
+        rows.append({
+            'label': b['buydown']['label'] if b['buydown']['years'] else 'No buydown',
+            'price': price, 'loan': b['loan'], 'by_year': m['by_year'],
+            'note_total': m['total'], 'cost': b['buydown']['cost'],
+            'cash_to_close': b['cash_to_close'],
+        })
+    return rows

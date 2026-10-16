@@ -93,7 +93,14 @@
                     </div>
                 </div>
                 {{ num_input('purchase_price', 'Purchase price', help=('Solved from your target payment' if solved_price else '')) }}
-                {{ num_input('target_payment', 'Target total monthly payment', help='PITI + HOA at the note rate (year 3+ if using a buydown). Uses the loan type, rate, down-payment mode and sale figures on this page - change the rate to see what you could afford at a different rate.') }}
+                {{ num_input('target_payment', 'Target total monthly payment', help='PITI + HOA. Uses the loan type, rate, buydown, down-payment mode and sale figures on this page - change the rate to see what you could afford at a different rate.') }}
+                <div class="hm-field hm-target-basis">
+                    <span>Target applies to</span>
+                    <div class="hm-radio-row">
+                        <label><input type="radio" name="target_basis" value="note" {{ 'checked' if params.target_basis != 'year1' }}> Full payment (note rate, after any buydown)</label>
+                        <label><input type="radio" name="target_basis" value="year1" {{ 'checked' if params.target_basis == 'year1' }}> Year-1 payment (with the buydown below)</label>
+                    </div>
+                </div>
 
                 <div class="hm-field">
                     <span>Down payment</span>
@@ -202,12 +209,32 @@
         {% if params.solve_for == 'payment' and params.target_payment %}
         <div class="hm-alert {{ 'ok' if solved_price else 'warn' }}">
             {% if solved_price %}
-            <strong>Reverse calc:</strong> to keep the total payment at {{ money(params.target_payment) }}/mo at {{ "%.2f"|format(b.rate) }}% ({{ result.loan_label }}), the most you can pay is about <strong>{{ money(solved_price) }}</strong>
+            <strong>Reverse calc:</strong> to keep the {{ 'year-1' if params.target_basis == 'year1' and b.buydown.years else 'total' }} payment at {{ money(params.target_payment) }}/mo at {{ "%.2f"|format(b.rate) }}% ({{ result.loan_label }}{% if b.buydown.years %}, {{ b.buydown.label }} buydown{% endif %}), the most you can pay is about <strong>{{ money(solved_price) }}</strong>
             &mdash; putting {{ money(b.down) }} down ({{ "%.1f"|format(b.down_pct) }}%), loan {{ money(b.loan) }}. Everything below is computed at that price.
+            {% if params.target_basis == 'year1' and b.buydown.years %}<br>The payment rises to <strong>{{ money(m.total) }}/mo</strong> once the buydown ends{% if m.by_year|length > 2 %} (year 2: {{ money(m.by_year[1].total) }}){% endif %}. Lenders qualify a temporary buydown at the full note-rate payment.{% endif %}
             {% else %}
             <strong>Reverse calc:</strong> no price reaches a {{ money(params.target_payment) }}/mo payment with these inputs. Showing the entered price instead.
             {% endif %}
         </div>
+        {% endif %}
+        {% if buydown_compare %}
+        <section class="hm-card hm-buydown-compare">
+            <h3>What {{ money(params.target_payment) }}/mo in year 1 buys, by buydown</h3>
+            <table class="hm-table">
+                <tr><th>Buydown</th><th>Max price</th><th>Year 1</th><th>Year 2</th><th>Year 3+</th><th>Buydown cost</th></tr>
+                {% for r in buydown_compare %}
+                <tr>
+                    <td>{{ r.label }}</td>
+                    <td><strong>{{ money(r.price) }}</strong></td>
+                    <td>{{ money(r.by_year[0].total) }}</td>
+                    <td>{{ money(r.by_year[1].total if r.by_year|length > 2 else r.note_total) }}</td>
+                    <td>{{ money(r.note_total) }}</td>
+                    <td>{{ money(r.cost) if r.cost else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </table>
+            <small>Rate, down payment, taxes, insurance and HOA as entered above. The buydown cost is escrowed at closing ({{ 'paid by the seller as a concession' if params.buydown_payer == 'seller' else 'added to your closing costs' }}); the year-3+ payment is what you'll carry for the rest of the loan.</small>
+        </section>
         {% endif %}
         <h2>Result — {{ result.loan_label }} at {{ "%.2f"|format(b.rate) }}%{% if b.rate_is_live %} (live){% endif %}, closing {{ result.closing_date_display }}</h2>
 
