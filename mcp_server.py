@@ -442,7 +442,7 @@ def generate_weekly_advisor_report() -> str:
     """Trigger generation of the weekly AI advisor report.
     Blocks until the LLM finishes (minutes on a CPU-only model). Returns a status string."""
     if not advisor_reports.llm_configured():
-        return "Advisor reports are off: set AGENT_OLLAMA_HOST to an Ollama-compatible endpoint to use them."
+        return "Advisor reports are off. Turn them on in the app under Admin -> AI settings."
     r = advisor_reports.generate_weekly_report()
     n = len((r or {}).get('insights') or '')
     return f"Weekly report generated. Insights: {n} chars."
@@ -452,7 +452,7 @@ def generate_monthly_advisor_report() -> str:
     """Trigger generation of the monthly AI advisor report.
     Blocks until the LLM finishes (can be many minutes). Returns a status string."""
     if not advisor_reports.llm_configured():
-        return "Advisor reports are off: set AGENT_OLLAMA_HOST to an Ollama-compatible endpoint to use them."
+        return "Advisor reports are off. Turn them on in the app under Admin -> AI settings."
     r = advisor_reports.generate_monthly_report()
     n = len((r or {}).get('insights') or '')
     return f"Monthly report generated. Insights: {n} chars."

@@ -1,10 +1,10 @@
 """Background scheduler for generating financial reports on a cron-like schedule."""
 
 import logging
-import os
 import threading
 from datetime import datetime, timedelta
 
+import ai
 from agent.db import db
 from agent.reports import (
     generate_weekly_report, generate_monthly_report, generate_portfolio_report,
@@ -52,23 +52,18 @@ def schedule_reports():
     - Monthly: 1st of each month at 6am
     - On startup: generates any missing current-period reports
 
-    Disabled unless ADVISOR_ENABLED=true, so a fresh install without an LLM
-    doesn't fill the reports collection with insight-less entries. Reports
-    can still be generated on demand from the Reports page once
-    AGENT_OLLAMA_HOST is set.
+    Runs only while scheduled reports are turned on (AI settings page, or
+    ADVISOR_ENABLED=true for installs configured with environment variables),
+    so a fresh install without AI doesn't fill the reports collection with
+    insight-less entries. The setting is checked at each wake-up, so turning
+    it on or off takes effect without a restart.
     """
-    if os.environ.get('ADVISOR_ENABLED', 'false').lower() != 'true':
-        logger.info("Report scheduler disabled (set ADVISOR_ENABLED=true to enable)")
-        return
-    if not os.environ.get('AGENT_OLLAMA_HOST', '').strip():
-        logger.warning("ADVISOR_ENABLED=true but AGENT_OLLAMA_HOST is not set; "
-                       "report scheduler disabled")
-        return
 
     def report_loop():
         # Startup catch-up
         try:
-            _check_and_generate()
+            if ai.scheduled_reports_enabled():
+                _check_and_generate()
         except Exception:
             logger.exception("Startup report generation failed")
 
@@ -98,7 +93,10 @@ def schedule_reports():
             threading.Event().wait(wait_seconds)
 
             try:
-                _check_and_generate()
+                if ai.scheduled_reports_enabled():
+                    _check_and_generate()
+                else:
+                    logger.info("Scheduled reports are off; skipping")
             except Exception:
                 logger.exception("Scheduled report generation failed")
 

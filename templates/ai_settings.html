@@ -1,0 +1,333 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .ai-page { max-width: 880px; }
+  .ai-page h1 { margin-bottom: 0.25rem; }
+  .ai-lead { color: #495057; font-size: 1rem; line-height: 1.55; margin: 0 0 1.25rem; }
+  .ai-box { background: #fff; border: 1px solid #dee2e6; border-radius: 10px; padding: 1.1rem 1.25rem; margin-bottom: 1.1rem; }
+  .ai-box h2 { font-size: 1.15rem; margin: 0 0 0.6rem; display: flex; align-items: center; gap: 0.6rem; }
+  .ai-step { display: inline-flex; align-items: center; justify-content: center; width: 1.7rem; height: 1.7rem;
+             border-radius: 50%; background: #2563eb; color: #fff; font-size: 0.9rem; font-weight: 700; flex: none; }
+  .ai-muted { color: #6c757d; font-size: 0.9rem; }
+  .ai-msg { border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5; }
+  .ai-msg.ok { background: #ecfdf5; border: 1px solid #6ee7b7; color: #065f46; }
+  .ai-msg.bad { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
+  .ai-msg.warn { background: #fffbeb; border: 1px solid #fcd34d; color: #78350f; }
+  .ai-msg ul { margin: 0.3rem 0 0 1.1rem; padding: 0; }
+  .ai-providers { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.6rem; }
+  .ai-provider { border: 2px solid #dee2e6; border-radius: 10px; padding: 0.7rem 0.8rem; cursor: pointer; display: block; line-height: 1.4; }
+  .ai-provider:hover { border-color: #93c5fd; }
+  .ai-provider input { margin-right: 0.35rem; }
+  .ai-provider strong { font-size: 1rem; }
+  .ai-provider span { display: block; color: #6c757d; font-size: 0.83rem; margin-top: 0.25rem; }
+  .ai-provider.selected { border-color: #2563eb; background: #eff6ff; }
+  .ai-guide ol { margin: 0.25rem 0 0.5rem 1.2rem; padding: 0; line-height: 1.6; }
+  .ai-guide li { margin-bottom: 0.45rem; }
+  .ai-guide code, .ai-page code { background: #f1f3f5; padding: 0.05rem 0.3rem; border-radius: 4px; font-size: 0.88em; }
+  .ai-field { margin: 0.6rem 0 0.9rem; }
+  .ai-field label { display: block; font-weight: 600; margin-bottom: 0.3rem; }
+  .ai-field input[type=text], .ai-field input[type=password], .ai-field input[type=url], .ai-field select {
+      width: 100%; max-width: 520px; padding: 0.5rem 0.6rem; border: 1px solid #ced4da; border-radius: 6px; font-size: 0.95rem; box-sizing: border-box; }
+  .ai-check { display: flex; gap: 0.6rem; align-items: flex-start; margin: 0.55rem 0; line-height: 1.45; }
+  .ai-check input { margin-top: 0.25rem; flex: none; }
+  .ai-sent { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin: 0.4rem 0 0.8rem; }
+  .ai-sent th, .ai-sent td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid #e9ecef; vertical-align: top; }
+  .ai-sent th { background: #f1f3f5; color: #212529; font-weight: 600; }
+  .ai-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+  .ai-btn { border: none; border-radius: 8px; padding: 0.65rem 1.2rem; font-size: 1rem; font-weight: 600; cursor: pointer; }
+  .ai-btn.primary { background: #2563eb; color: #fff; }
+  .ai-btn.secondary { background: #e9ecef; color: #212529; }
+  .ai-btn.danger { background: #fff; color: #b91c1c; border: 1px solid #fca5a5; }
+  .ai-page details { margin: 0.5rem 0; }
+  .ai-page summary { cursor: pointer; font-weight: 600; }
+  .ai-cost { font-size: 0.85rem; color: #495057; }
+  @media (max-width: 600px) { .ai-box { padding: 0.9rem; } }
+</style>
+
+<div class="ai-page">
+  <h1>AI (optional)</h1>
+  <p class="ai-lead">
+    Accounting Cloud works fully without AI. If you turn it on, an AI service can write weekly and
+    monthly briefings about your money, sort card purchases that the built-in rules don't recognise,
+    and suggest ways to save. You bring your own account with Claude, ChatGPT or Gemini (you pay them
+    directly, usually cents to a couple of dollars a month), or run a free model on your own
+    computer with Ollama.
+  </p>
+
+  {% if not secret_ok %}
+  <div class="ai-msg warn">
+    <strong>One thing first:</strong> this app was started without a <code>SECRET_KEY</code>, so it cannot
+    store an API key safely. If you installed with the one-line installer this is already set; otherwise
+    add <code>SECRET_KEY=</code> with a long random value to your <code>.env</code> file and restart
+    (see the README). Ollama without a key still works.
+  </div>
+  {% endif %}
+
+  {% if message %}
+  <div class="ai-msg {{ 'ok' if message_ok else 'bad' }}">
+    {% if message_ok %}&#10004;{% else %}&#9888;{% endif %} {{ message }}
+    {% if message_ok and saved.provider and saved.provider != 'none' %}<br>You're all set. AI features now run in the background as you use the app.{% endif %}
+  </div>
+  {% endif %}
+
+  {% if errors %}
+  <div class="ai-msg bad"><strong>Please fix this and try again:</strong>
+    <ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <!-- Current status -->
+  <div class="ai-box">
+    <h2>Right now</h2>
+    {% if status.provider == 'none' %}
+      <p style="margin:0;"><strong>AI is off.</strong> Nothing is sent to any AI service.</p>
+    {% else %}
+      <p style="margin:0 0 0.5rem;">
+        <strong>On, using {{ status.label }}</strong>
+        {% if status.source == 'env' %}(set up with environment variables in <code>.env</code>; saving this page replaces them){% endif %}
+        {% if saved.api_key_hint %}<span class="ai-muted"> &middot; key ending in &hellip;{{ saved.api_key_hint }}</span>{% endif %}
+      </p>
+      <p class="ai-muted" style="margin:0 0 0.6rem;">
+        Card categorization: {{ 'on' if status.purposes.categorize else 'off' }} &middot;
+        Spending tips: {{ 'on' if status.purposes.tips else 'off' }} &middot;
+        Advisor reports: {{ 'on' if status.purposes.report else 'off' }}{% if status.scheduled_reports %} (automatic weekly and monthly){% endif %}
+        {% if saved.last_test %}<br>Last check: {{ 'worked' if saved.last_test.ok else 'failed' }}{% if saved.last_test.at %}, {{ saved.last_test.at.strftime('%b %d, %Y %I:%M %p') }}{% endif %}{% endif %}
+      </p>
+      {% if status.source == 'settings' %}
+      <form method="POST" action="{{ url_for('ai_settings_save') }}" class="ai-actions">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="ai-btn secondary" name="action" value="test">Test the connection again</button>
+        <button class="ai-btn danger" name="action" value="off">Turn AI off</button>
+        {% if saved.api_key_hint %}<button class="ai-btn danger" name="action" value="remove_key">Turn off and delete the saved key</button>{% endif %}
+      </form>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <form method="POST" action="{{ url_for('ai_settings_save') }}" id="ai-form" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="action" value="save">
+
+    <!-- Step 1 -->
+    <div class="ai-box">
+      <h2><span class="ai-step">1</span> Choose an AI service</h2>
+      <p class="ai-muted" style="margin-top:0;">Not sure? Pick <strong>Claude</strong>, <strong>ChatGPT</strong> or <strong>Gemini</strong>,
+        whichever company you'd rather trust with the data listed in step 5. All three work well here.
+        Ollama is free and private but needs a capable computer and some setup.</p>
+      <div class="ai-providers">
+        {% set current = s.provider or 'none' %}
+        <label class="ai-provider">
+          <input type="radio" name="provider" value="none" {% if current == 'none' %}checked{% endif %}>
+          <strong>Off</strong>
+          <span>No AI. Nothing is sent anywhere.</span>
+        </label>
+        <label class="ai-provider">
+          <input type="radio" name="provider" value="anthropic" {% if current == 'anthropic' %}checked{% endif %}>
+          <strong>Claude</strong>
+          <span>By Anthropic. Pay as you go with prepaid credit; a few dollars lasts months.</span>
+        </label>
+        <label class="ai-provider">
+          <input type="radio" name="provider" value="openai" {% if current == 'openai' %}checked{% endif %}>
+          <strong>ChatGPT</strong>
+          <span>By OpenAI. Pay as you go; $5 minimum prepaid credit.</span>
+        </label>
+        <label class="ai-provider">
+          <input type="radio" name="provider" value="gemini" {% if current == 'gemini' %}checked{% endif %}>
+          <strong>Gemini</strong>
+          <span>By Google. Use the paid tier ($5 minimum prepaid credit); see the privacy note.</span>
+        </label>
+        <label class="ai-provider">
+          <input type="radio" name="provider" value="ollama" {% if current == 'ollama' %}checked{% endif %}>
+          <strong>Ollama</strong>
+          <span>Runs on your own computer. Free and private; advanced.</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Step 2: provider walkthroughs -->
+    <div class="ai-box ai-guide" data-when="anthropic openai gemini ollama">
+      <h2><span class="ai-step">2</span> Get your API key</h2>
+      <p class="ai-muted" style="margin-top:0;">An API key is a long password that lets this app use your
+        AI account. This takes about 5 minutes. Keep this page open in one tab and do the steps in another.</p>
+
+      <div data-provider="anthropic">
+        <h3>Claude (Anthropic)</h3>
+        {% include "ai_guide_anthropic.html" %}
+      </div>
+      <div data-provider="openai">
+        <h3>ChatGPT (OpenAI)</h3>
+        {% include "ai_guide_openai.html" %}
+      </div>
+      <div data-provider="gemini">
+        <h3>Gemini (Google)</h3>
+        {% include "ai_guide_gemini.html" %}
+      </div>
+      <div data-provider="ollama">
+        <h3>Ollama (your own computer)</h3>
+        {% include "ai_guide_ollama.html" %}
+      </div>
+    </div>
+
+    <!-- Step 3: key and models -->
+    <div class="ai-box" data-when="anthropic openai gemini ollama">
+      <h2><span class="ai-step">3</span> Paste your key and choose models</h2>
+
+      {% for pid in cloud_providers %}{% set info = providers[pid] %}
+      <div data-provider="{{ pid }}">
+        <div class="ai-field">
+          <label for="api_key_{{ pid }}">{{ info.short }} API key</label>
+          <input type="password" id="api_key_{{ pid }}" name="api_key_{{ pid }}" spellcheck="false"
+                 placeholder="{% if saved.provider == pid and saved.api_key_hint %}Saved (ends in …{{ saved.api_key_hint }}). Leave blank to keep it.{% else %}Paste the key that starts with {{ info.key_prefix|join(' or ') }}{% endif %}">
+          <div class="ai-muted">It's stored encrypted and is never shown again. It is not included in backups you download from Admin.</div>
+        </div>
+        <div class="ai-field">
+          <label for="model_fast_{{ pid }}">Model for everyday tasks (sorting purchases, tips)</label>
+          <select id="model_fast_{{ pid }}" name="model_fast_{{ pid }}">
+            {% for m in info.models %}
+            <option value="{{ m.id }}" {% if (s.provider == pid and s.model_fast == m.id) or (s.provider != pid and info.default_fast == m.id) %}selected{% endif %}>
+              {{ m.label }} &mdash; about ${{ '%.2f' % (0.07 * m.price[0] + 0.04 * m.price[1]) }}/month</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="ai-field">
+          <label for="model_report_{{ pid }}">Model for advisor reports</label>
+          <select id="model_report_{{ pid }}" name="model_report_{{ pid }}">
+            {% for m in info.models %}
+            <option value="{{ m.id }}" {% if (s.provider == pid and s.model_report == m.id) or (s.provider != pid and info.default_report == m.id) %}selected{% endif %}>
+              {{ m.label }} &mdash; about ${{ '%.2f' % (0.05 * m.price[0] + 0.02 * m.price[1]) }}/month</option>
+            {% endfor %}
+          </select>
+        </div>
+        <p class="ai-cost">Costs are rough estimates for a typical household (a few card statements and a weekly
+          and monthly report each month); your provider's usage page shows the real figure. The cheaper models
+          do these jobs well.</p>
+      </div>
+      {% endfor %}
+
+      <div data-provider="ollama">
+        <div class="ai-field">
+          <label for="ollama_url">Ollama address</label>
+          <input type="url" id="ollama_url" name="ollama_url" value="{{ s.ollama_url or '' }}"
+                 placeholder="http://host.docker.internal:11434">
+          <div class="ai-muted">If Ollama runs on the same computer as this app (installed with the installer),
+            use <code>http://host.docker.internal:11434</code>. On another computer, use its address, e.g.
+            <code>http://192.168.1.20:11434</code>.</div>
+        </div>
+        <div class="ai-field">
+          <label for="model_fast_ollama">Model for everyday tasks</label>
+          <input type="text" id="model_fast_ollama" name="model_fast_ollama"
+                 value="{{ s.model_fast if s.provider == 'ollama' and s.model_fast else providers.ollama.default_fast }}">
+        </div>
+        <div class="ai-field">
+          <label for="model_report_ollama">Model for advisor reports</label>
+          <input type="text" id="model_report_ollama" name="model_report_ollama"
+                 value="{{ s.model_report if s.provider == 'ollama' and s.model_report else providers.ollama.default_report }}">
+          <div class="ai-muted">Use the exact names shown by <code>ollama list</code>.</div>
+        </div>
+        <div class="ai-field">
+          <label for="api_key_ollama">Access key (only if your Ollama sits behind a gateway that needs one)</label>
+          <input type="password" id="api_key_ollama" name="api_key_ollama" spellcheck="false" placeholder="Usually left blank">
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: features -->
+    <div class="ai-box" data-when="anthropic openai gemini ollama">
+      <h2><span class="ai-step">4</span> Choose what AI does</h2>
+      {% set f = s.features or {} %}
+      <label class="ai-check"><input type="checkbox" name="feature_categorize" {% if f.categorize %}checked{% endif %}>
+        <span><strong>Sort card purchases the built-in rules don't recognise.</strong>
+          After you import a statement, purchases left as "Other" are sorted into a category. They get a small
+          <em>AI</em> mark so you can check them.</span></label>
+      <label class="ai-check"><input type="checkbox" name="feature_tips" {% if f.tips %}checked{% endif %}>
+        <span><strong>Spending tips</strong> in the Insights panel on the Credit Cards page.</span></label>
+      <label class="ai-check"><input type="checkbox" name="feature_report" {% if f.report %}checked{% endif %}>
+        <span><strong>Advisor reports</strong>: weekly and monthly briefings on the Advisor page, written when you click
+          "Regenerate now".</span></label>
+      <label class="ai-check" style="margin-left:1.6rem;"><input type="checkbox" name="feature_scheduled_reports" {% if f.scheduled_reports %}checked{% endif %}>
+        <span>Also write them automatically: every Monday and on the 1st of the month, at 6 am.</span></label>
+    </div>
+
+    <!-- Step 5: privacy -->
+    <div class="ai-box" data-when="anthropic openai gemini ollama">
+      <h2><span class="ai-step">5</span> What gets sent</h2>
+      <p style="margin-top:0;">Each feature sends only what it needs, and only when it runs:</p>
+      <table class="ai-sent">
+        <tr><th>Feature</th><th>What is sent</th></tr>
+        <tr><td>Sorting purchases</td><td>The merchant name from a card transaction (for example "JOES CAFE"), with the list of categories. No amounts, dates or account details.</td></tr>
+        <tr><td>Spending tips</td><td>Your card spending totals by category for recent months and your top 20 merchants with totals.</td></tr>
+        <tr><td>Advisor reports</td><td>A summary of your finances: account balances, budget and spending by category, recurring bills and income, debts, investments, net worth, and the household profile if you set one up. No account numbers or passwords.</td></tr>
+      </table>
+      <div data-provider="anthropic openai gemini">
+        <p class="ai-muted">Each company's handling of this data is described in the step 2 instructions above.
+          Nothing is sent for features you leave unticked.</p>
+        <label class="ai-check"><input type="checkbox" name="consent" {% if s.consent_provider and s.consent_provider == s.provider %}checked{% endif %}>
+          <span><strong>I understand that the information above is sent to <span class="ai-company">the company I chose</span>
+            when these features run.</strong></span></label>
+      </div>
+      <div data-provider="ollama">
+        <p class="ai-muted">With Ollama the data goes only to the Ollama server address you entered, which you run yourself.</p>
+      </div>
+    </div>
+
+    <div class="ai-actions" style="margin-bottom:1.25rem;">
+      <button type="submit" class="ai-btn primary" id="ai-save">Save and test</button>
+      <span class="ai-muted" id="ai-save-hint">Saving sends one tiny test message to check the key works.</span>
+    </div>
+  </form>
+
+  <details class="ai-box">
+    <summary>Questions</summary>
+    <p><strong>How much will this cost?</strong> With the cheaper models, usually a few cents a month for a household.
+      With the most capable models, roughly $1&ndash;3 a month. Set a spending limit with your provider (step 2 shows where)
+      so a bill can never surprise you.</p>
+    <p><strong>Is my API key safe?</strong> It's stored encrypted in this app's database, using the app's secret key, and it's
+      left out of the backups you download from Admin. The page never shows it again. Anyone who can open this app can
+      use the AI features, but cannot read the key. You can delete it any time ("Turn off and delete the saved key").
+      If a key ever leaks, delete it on the provider's website and make a new one.</p>
+    <p><strong>Do these companies train their AI on my data?</strong> See the privacy note in step 2 for the service you
+      picked. In short: Anthropic and OpenAI don't train on data sent with an API key by default. Google may use data
+      sent on Gemini's free tier; turn on billing in Google AI Studio to avoid that.</p>
+    <p><strong>Can I switch services later?</strong> Yes. Pick another one, paste its key and save. The old key is
+      not reused for the new service.</p>
+    <p><strong>How do I turn AI off?</strong> Click "Turn AI off" at the top of this page, or choose "Off" in step 1 and save.</p>
+  </details>
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('ai-form');
+  var companies = {anthropic: 'Anthropic (Claude)', openai: 'OpenAI (ChatGPT)', gemini: 'Google (Gemini)'};
+
+  function selected() {
+    var r = form.querySelector('input[name=provider]:checked');
+    return r ? r.value : 'none';
+  }
+
+  function refresh() {
+    var p = selected();
+    document.querySelectorAll('.ai-provider').forEach(function (el) {
+      el.classList.toggle('selected', el.querySelector('input').checked);
+    });
+    document.querySelectorAll('[data-when]').forEach(function (el) {
+      el.style.display = el.dataset.when.split(' ').indexOf(p) >= 0 ? '' : 'none';
+    });
+    document.querySelectorAll('[data-provider]').forEach(function (el) {
+      el.style.display = el.dataset.provider.split(' ').indexOf(p) >= 0 ? '' : 'none';
+    });
+    document.querySelectorAll('.ai-company').forEach(function (el) {
+      el.textContent = companies[p] || 'the company I chose';
+    });
+    document.getElementById('ai-save').textContent = p === 'none' ? 'Save (AI off)' : 'Save and test';
+    document.getElementById('ai-save-hint').style.display = p === 'none' ? 'none' : '';
+  }
+
+  form.querySelectorAll('input[name=provider]').forEach(function (r) {
+    r.addEventListener('change', refresh);
+  });
+
+  refresh();
+})();
+</script>
+{% endblock %}

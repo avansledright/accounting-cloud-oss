@@ -154,12 +154,15 @@ by hand or with a small script.
 
 ### Optional LLM pass
 
-Rows the keyword rules leave at `Other` can be sent to a local LLM. The LLM is
+Rows the keyword rules leave at `Other` can be sent to an LLM. The LLM is
 **optional**: with it disabled or unreachable, everything still works and
 unresolved rows stay at `Other`.
 
-Any server exposing the Ollama-compatible `POST /api/chat` endpoint works: a
-plain local Ollama, or a gateway in front of one.
+It runs on the AI service set up on **Admin → AI settings** (Claude, ChatGPT,
+Gemini or Ollama; see [ai.md](ai.md)), when "Sort card purchases" is ticked
+there. The variables below are the older configuration (Ollama-compatible
+`POST /api/chat` only), used only while no settings have been saved on that
+page.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -236,7 +239,7 @@ plus `scope` (`current` restricts to the selected month) and returns:
 |---|---|---|
 | `duplicates` | `detect_duplicate_charges()` | Merchants (normalised by `normalize_merchant()`, which drops suffixes like INC/LLC, store and reference numbers, truncated to 25 characters) with **three or more** charges in one statement month. Top 20 by total. |
 | `subscriptions` | `detect_subscription_overlap()` | Groups in `SUBSCRIPTION_GROUPS` where **two or more** different services were charged. Always looks across all months (the month filter is ignored). |
-| `ai_tips` | `get_ollama_savings_tips()` | Three to five tips from the LLM, or an empty list |
+| `ai_tips` | `get_ai_savings_tips()` | Up to five tips from the AI service, or an empty list when AI tips are off |
 
 ### Subscription groups
 
@@ -249,13 +252,13 @@ customise.
 
 ### AI spending analysis
 
-`get_ollama_savings_tips()` first pings `OLLAMA_URL/api/tags` with a 3-second
-timeout and returns nothing if the server is unreachable. Otherwise it
-aggregates spending by category and statement month plus the top 20
-descriptions by total, sends them to `OLLAMA_MODEL` with `format: 'json'` and
-`think: False` (90-second timeout), and returns up to five
-`{title, detail, potential_savings}` objects. Any error yields an empty list.
-This uses the same `OLLAMA_*` settings as categorisation.
+`get_ai_savings_tips()` runs when "Spending tips" is on in **Admin → AI
+settings**. With Ollama it first pings `/api/tags` with a 3-second timeout and
+returns nothing if the server is unreachable. It aggregates spending by
+category and statement month plus the top 20 descriptions by total, sends them
+with a JSON schema (`{"tips": [{title, detail, potential_savings}]}`) through
+`ai.generate('tips', ...)`, and returns up to five tips. Any error yields an
+empty list. See [ai.md](ai.md).
 
 ## Payment plans
 

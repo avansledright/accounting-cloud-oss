@@ -27,6 +27,11 @@ services:
     env_file:
       - path: .env
         required: false
+    # Lets the optional AI settings reach an Ollama on this computer at
+    # http://host.docker.internal:11434 (built in on Docker Desktop; this
+    # line adds it on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       MONGO_URI: mongodb://db:27017/
       MONGO_DB_NAME: ${MONGO_DB_NAME:-accounting_cloud}
@@ -54,6 +59,8 @@ services:
     env_file:
       - path: .env
         required: false
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       MONGO_URI: mongodb://db:27017/
       MONGO_DB_NAME: ${MONGO_DB_NAME:-accounting_cloud}

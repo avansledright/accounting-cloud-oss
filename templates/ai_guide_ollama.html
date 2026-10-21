@@ -1,0 +1,21 @@
+<p class="ai-muted" style="margin-top:0;">For people comfortable installing software. Ollama runs AI models on
+  your own computer, so nothing leaves your network and there is no bill. It needs a reasonably powerful computer:
+  at least 16 GB of memory, and a graphics card or an Apple Silicon Mac makes it much faster.</p>
+<ol>
+  <li>Download Ollama from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>
+    and install it. It runs in the background (on Windows and Mac you'll see its icon near the clock).</li>
+  <li>Open a terminal (the same way as in the installation steps) and download the two models this app uses by default:
+    <br><code>ollama pull granite4.2:3b</code>
+    <br><code>ollama pull gemma4:e4b</code>
+    <br>Each is a few GB. Any other model works too; type its name in step 3.</li>
+  <li>Let the app reach Ollama. The app runs inside Docker, so Ollama has to accept connections from it:
+    <ul>
+      <li><strong>Windows and Mac:</strong> open Ollama's settings and turn on <em>Expose Ollama to the network</em>,
+        then restart Ollama.</li>
+      <li><strong>Linux:</strong> run <code>sudo systemctl edit ollama</code>, add the two lines
+        <code>[Service]</code> and <code>Environment="OLLAMA_HOST=0.0.0.0"</code>, save, then run
+        <code>sudo systemctl restart ollama</code>.</li>
+    </ul>
+    Only do this on a home network you trust: anyone on it can then use your Ollama.</li>
+  <li>Enter the address in step 3 below. No API key is needed.</li>
+</ol>

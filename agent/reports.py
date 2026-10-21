@@ -4,8 +4,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 
-import requests
-
+import ai
 from agent.db import db
 from models import INVESTMENT_ACCOUNT_TYPES
 from agent.tools.accounts import get_account_balances, get_account_summary
@@ -24,48 +23,27 @@ from agent.prompts import (
 
 logger = logging.getLogger(__name__)
 
-# Any server exposing the Ollama-compatible /api/chat endpoint works. This can
-# be a different (bigger, slower) model than the one used for credit-card
-# categorization (OLLAMA_URL / OLLAMA_MODEL in app.py), since reports run in
-# a background thread and nobody waits on them. Optional: with
-# AGENT_OLLAMA_HOST unset, advisor reports are off.
-OLLAMA_HOST = os.environ.get('AGENT_OLLAMA_HOST', '').strip().rstrip('/')
-OLLAMA_MODEL = os.environ.get('AGENT_OLLAMA_MODEL', 'gemma4:e4b')
-OLLAMA_API_KEY = os.environ.get('AGENT_OLLAMA_API_KEY', '')
-OLLAMA_TIMEOUT = int(os.environ.get('AGENT_OLLAMA_TIMEOUT', '3600'))
-
+# Reports go through ai.py, which picks the provider (Claude, ChatGPT, Gemini or
+# Ollama) from the AI settings page. Optional: with AI off, reports are off.
 
 def llm_configured() -> bool:
-    """True when an LLM endpoint for advisor reports is set (AGENT_OLLAMA_HOST)."""
-    return bool(OLLAMA_HOST)
+    """True when advisor reports have an AI provider to run on."""
+    return ai.enabled('report')
 
 
 def _call_ollama(prompt: str) -> str | None:
-    """Post a prompt to Ollama and return the response text, or None on failure.
+    """Run a report prompt on the configured AI provider; None on failure.
 
-    Generation runs in a daemon thread (see app._run_report_async), so wall
-    time doesn't affect the request UX. We let the model run as long as it
-    needs — the timeout is generous on purpose.
+    (Name kept from when reports only ran on Ollama.) Generation runs in a
+    daemon thread (see app._run_report_async), so wall time doesn't matter.
     """
-    if not OLLAMA_HOST:
-        return None
     try:
-        resp = requests.post(
-            f"{OLLAMA_HOST}/api/chat",
-            json={
-                'model': OLLAMA_MODEL,
-                'messages': [{'role': 'user', 'content': prompt}],
-                'stream': False,
-                'options': {'temperature': 0.4, 'num_ctx': 8192},
-            },
-            headers=({'Authorization': f'Bearer {OLLAMA_API_KEY}'} if OLLAMA_API_KEY else {}),
-            # Generous on purpose: a mid-size model on CPU can run under 1 tok/s.
-            timeout=OLLAMA_TIMEOUT,
-        )
-        resp.raise_for_status()
-        return resp.json()['message']['content']
+        return ai.generate('report', prompt)
+    except ai.AIError as e:
+        logger.warning("Advisor report request failed: %s", e)
+        return None
     except Exception:
-        logger.exception("Ollama request failed")
+        logger.exception("Advisor report request failed")
         return None
 
 

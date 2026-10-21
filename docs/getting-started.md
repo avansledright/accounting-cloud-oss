@@ -241,8 +241,10 @@ as you go. Hide it when you no longer need it; Admin can bring it back.
   [benefits.md](benefits.md)
 - **AI assistants:** the optional MCP server lets Claude or another MCP client
   read and update your data. [mcp-server.md](mcp-server.md)
-- **Advisor reports:** optional weekly and monthly briefings from a local LLM.
-  [advisor-agent.md](advisor-agent.md)
+- **AI (optional):** advisor reports, smarter sorting of card purchases and
+  spending tips, using Claude, ChatGPT or Gemini with your own key, or a local
+  Ollama. Set it up on **Admin → AI settings**, which walks you through it.
+  [ai.md](ai.md)
 - **Backups:** set them up before you rely on the app.
   [deployment.md](deployment.md#backups-and-restore)
 

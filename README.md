@@ -77,7 +77,11 @@ Click **Load demo data instead** on the first page.
   phone or another computer, see [docs/deployment.md](docs/deployment.md);
   that part is for technical users.
 - The AI features are **optional and off**. Nothing is sent to any AI
-  service unless you set one up yourself.
+  service unless you set one up yourself. To turn them on (advisor reports,
+  smarter sorting of card purchases, spending tips), go to **Admin → AI
+  settings** and follow the steps there to connect Claude, ChatGPT or Gemini
+  with your own account, usually a few cents to a couple of dollars a month.
+  [How it works](docs/ai.md)
 - The only things it reaches out to the internet for are stock prices and
   mortgage rates.
 - Stuck? [Open an issue](https://github.com/avansledright/accounting-cloud-oss/issues)
@@ -94,8 +98,9 @@ Everything below is the technical detail: what's inside, other ways to run
 it, configuration and architecture.
 
 Built with Flask, MongoDB and server-rendered Jinja2 templates. No cloud
-services required; the optional AI features work with any Ollama-compatible
-endpoint, including one on your own machine.
+services required; the optional AI features use Claude, ChatGPT or Gemini
+with the user's own API key, or any Ollama-compatible endpoint, including one
+on your own machine.
 
 > [!WARNING]
 > **There is no built-in authentication.** Anyone who can reach the web port
@@ -164,10 +169,11 @@ data set (`scripts/seed_demo.py`)._
   HTTP with bearer-token auth, for Claude and other MCP clients.
   [docs](docs/mcp-server.md)
 - **AI extras** (optional, off by default): weekly, monthly and portfolio
-  briefings written by a local LLM from your data, smarter categorization of
-  unknown merchants, and spending tips. They need an Ollama-compatible
-  server you run yourself; without one, everything else works the same.
-  [docs](docs/advisor-agent.md)
+  briefings about your money, smarter categorization of unknown merchants,
+  and spending tips. Set up in the app (Admin → AI settings) with Claude,
+  ChatGPT or Gemini using your own API key, or a local Ollama; a
+  step-by-step walkthrough is on the page. Without it, everything else works
+  the same. [docs](docs/ai.md)
   [docs](docs/advisor-agent.md)
 
 A page-by-page tour is in [docs/features.md](docs/features.md).
@@ -219,11 +225,11 @@ the tests: [docs/development.md](docs/development.md).
 
 ### Optional extras
 
-- **AI features:** run [Ollama](https://ollama.com) (or any
-  Ollama-compatible server) and set `OLLAMA_URL` (card categorization and
-  spending tips) and/or `AGENT_OLLAMA_HOST` (advisor reports) in `.env`, then
-  restart. Leave them blank and no AI endpoint is ever contacted.
-  [docs](docs/advisor-agent.md)
+- **AI features:** in the app, **Admin → AI settings** (`/settings/ai`):
+  Claude, ChatGPT, Gemini or Ollama, with the key stored encrypted with
+  `SECRET_KEY`. The older `OLLAMA_URL` / `AGENT_OLLAMA_HOST` variables still
+  work until settings are saved there. Off by default; nothing contacts an AI
+  service until it's set up. [docs](docs/ai.md)
 - **MCP server** for AI clients such as Claude: set `MCP_API_TOKEN` in
   `.env`, then `docker compose --profile mcp up -d`.
   [docs](docs/mcp-server.md)
@@ -280,7 +286,7 @@ endpoints you configure.
    AI client --------> mcp: mcp_server.py (bearer token) ------------^
                        uses agent/tools/* (shared read/write helpers)
 
-   optional outbound: Yahoo Finance / Alpha Vantage, FRED, Ollama-compatible LLM
+   optional outbound: Yahoo Finance / Alpha Vantage, FRED, the AI provider you set up
 ```
 
 - `app.py`: every route and the business logic (projection engine, imports,
@@ -299,6 +305,7 @@ Details: [docs/architecture.md](docs/architecture.md).
 | Topic | |
 |---|---|
 | **Getting started: install, setup wizard, first week, core concepts** | [docs/getting-started.md](docs/getting-started.md) |
+| **AI features: set up Claude, ChatGPT, Gemini or Ollama** | [docs/ai.md](docs/ai.md) |
 | Architecture and data model | [docs/architecture.md](docs/architecture.md) |
 | Budget system | [docs/budget.md](docs/budget.md) |
 | Ledger projection engine | [docs/ledger-projections.md](docs/ledger-projections.md) |

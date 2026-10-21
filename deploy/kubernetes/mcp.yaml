@@ -33,6 +33,9 @@ spec:
         - configMapRef:
             name: accounting-config
         env:
+        # Needed to read the AI provider key saved on the AI settings page.
+        - name: SECRET_KEY
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: SECRET_KEY}}
         - name: MCP_HOST
           value: "0.0.0.0"
         - name: MCP_PORT

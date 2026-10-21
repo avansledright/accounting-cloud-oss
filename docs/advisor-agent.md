@@ -84,8 +84,14 @@ The templates are filled with `str.format()` in `agent/reports.py`.
 
 ## LLM call
 
-`_call_ollama()` in `agent/reports.py` posts to any server that implements the
-Ollama-compatible `/api/chat` endpoint:
+> Reports now run on whichever AI service is set up on **Admin → AI
+> settings**: Claude, ChatGPT, Gemini or Ollama. See [ai.md](ai.md). The
+> `_call_ollama()` name is kept, but it calls `ai.generate('report', prompt)`.
+> The environment variables below are the older configuration, used only
+> while no settings have been saved on that page.
+
+With the environment-variable configuration, `_call_ollama()` posts to any
+server that implements the Ollama-compatible `/api/chat` endpoint:
 
 ```python
 POST {AGENT_OLLAMA_HOST}/api/chat
@@ -118,9 +124,11 @@ waits on them, so they can use a bigger, slower model than the categoriser.
 ## Scheduler
 
 `agent.scheduler.schedule_reports()` is called once when `app.py` is imported.
-It starts a daemon thread **only when `ADVISOR_ENABLED=true`**. Otherwise it
-logs `Report scheduler disabled` and returns, so a fresh install without an
-LLM does not fill the `reports` collection with insight-less entries.
+It starts a daemon thread that checks, at startup and at each wake-up, whether
+scheduled reports are on (**Admin → AI settings → "Also write them
+automatically"**, or `ADVISOR_ENABLED=true` with the environment-variable
+configuration). When they are off it skips the run, so a fresh install without
+AI does not fill the `reports` collection with insight-less entries.
 
 When enabled, the thread:
 

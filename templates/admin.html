@@ -50,6 +50,23 @@
         </div>
     </div>
 
+    <!-- AI Section -->
+    <div class="admin-section">
+        <h2>AI features (optional)</h2>
+        {% if ai_status.provider != 'none' %}
+        <p>Using <strong>{{ ai_status.label }}</strong>{% if ai_status.source == 'env' %} (set up with environment variables){% endif %}.</p>
+        {% else %}
+        <p>Off. Everything in the app works without AI. Turn it on to get advisor reports, smarter
+           categorization of unknown card merchants and spending tips, using Claude, ChatGPT, Gemini or
+           your own Ollama.</p>
+        {% endif %}
+        <div class="export-buttons">
+            <a href="{{ url_for('ai_settings_page') }}" class="action-btn edit-btn" style="height:auto;padding:0.5rem 1rem;">
+                {% if ai_status.provider != 'none' %}AI settings{% else %}Set up AI (step by step){% endif %}
+            </a>
+        </div>
+    </div>
+
     <!-- Database Statistics Section -->
     <div class="admin-section">
         <h2>Database Statistics</h2>

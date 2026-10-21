@@ -181,10 +181,9 @@
      padding:0.9rem 1.1rem;margin-bottom:1.25rem;font-size:0.92rem;line-height:1.5;">
   <strong>The AI advisor is optional and turned off.</strong>
   Everything else in the app works without it. To get weekly and monthly
-  briefings written by a language model, run <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>
-  (or any Ollama-compatible server), set <code>AGENT_OLLAMA_HOST</code> in your
-  <code>.env</code> file, and restart. See the
-  <a href="https://github.com/avansledright/accounting-cloud-oss/blob/main/docs/advisor-agent.md" target="_blank" rel="noopener">advisor docs</a>.
+  briefings about your money, connect Claude, ChatGPT or Gemini with your own
+  API key, or your own Ollama:
+  <a href="{{ url_for('ai_settings_page') }}"><strong>Set up AI, step by step</strong></a>.
 </div>
 {% endif %}
 

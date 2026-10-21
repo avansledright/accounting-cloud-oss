@@ -6,7 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- AI settings page (**Admin → AI settings**, `/settings/ai`): choose Claude
+  (Anthropic), ChatGPT (OpenAI), Gemini (Google) or Ollama, paste an API key,
+  pick models and which features use AI, with a step-by-step walkthrough for
+  getting a key from each provider, a plain list of what each feature sends,
+  a consent tick box for the cloud providers, rough monthly cost estimates,
+  and "Save and test" / "Test again" / "Turn AI off" / "delete the saved key".
+- `ai.py`: one module that every AI feature (card categorization, spending
+  tips, advisor reports, the MCP report tools) goes through, with structured
+  JSON output on every provider. Settings live in the `ai_settings`
+  collection; the API key is encrypted with a key derived from `SECRET_KEY`
+  and is left out of the JSON export and import. A saved key is only reused
+  for the provider it was entered for.
+- Scheduled advisor reports can be turned on from the page; the scheduler
+  checks the setting at each run, so no restart is needed.
+- `docs/ai.md`: the same walkthrough, plus how it works.
+- Dependencies: `anthropic` (Claude, via the official SDK) and
+  `cryptography` (key encryption).
+
 ### Changed
+- The `OLLAMA_*` / `AGENT_OLLAMA_*` / `CC_LLM_ENABLED` / `ADVISOR_ENABLED`
+  environment variables still work, but only until settings are saved on
+  the page, which then take over.
+- Compose maps `host.docker.internal` to the host on Linux too, so a local
+  Ollama is reachable at the same address on every system. The Kubernetes
+  MCP deployment now receives `SECRET_KEY` (needed to read the saved key).
 - The AI features are off unless an endpoint is set: `OLLAMA_URL` and
   `AGENT_OLLAMA_HOST` now default to empty (they used to default to
   `http://localhost:11434`). With them blank, card categorization uses only

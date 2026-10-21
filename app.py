@@ -154,6 +154,7 @@ db = client[os.environ.get("MONGO_DB_NAME", "accounting_cloud")]
 import agent.db as agent_db
 import agent.scheduler as agent_scheduler
 import agent.reports as agent_reports
+import ai
 agent_db.init(db)
 agent_scheduler.schedule_reports()
 
@@ -225,7 +226,7 @@ def reports_page():
 
     return render_template('reports.html', weekly=weekly, monthly=monthly,
                            portfolio=portfolio, history=history, jobs=jobs,
-                           advisor_configured=agent_reports.llm_configured())
+                           advisor_configured=ai.enabled('report'), ai_status=ai.status())
 
 
 @app.route('/api/reports/status')
@@ -263,12 +264,12 @@ def report_detail(report_id):
                            monthly=report if report['type']=='monthly' else None,
                            portfolio=report if report['type']=='portfolio' else None,
                            history=history, viewing_id=str(rid),
-                           advisor_configured=agent_reports.llm_configured())
+                           advisor_configured=ai.enabled('report'), ai_status=ai.status())
 
 
 @app.route('/api/reports/generate', methods=['POST'])
 def generate_reports():
-    if not agent_reports.llm_configured():
+    if not ai.enabled('report'):
         return redirect(url_for('reports_page'))
     report_type = request.form.get('report_type', 'both')
     if report_type in ('weekly', 'both', 'all'):
@@ -3624,6 +3625,10 @@ def delete_asset(asset_id):
     return redirect(url_for('assets_page'))
 
 
+# Never written to or restored from the JSON backup.
+EXPORT_EXCLUDED_COLLECTIONS = {'ai_settings'}
+
+
 @app.route('/export')
 def export_data():
     """Full JSON backup of every collection.
@@ -3632,6 +3637,9 @@ def export_data():
     included automatically — no need to update this list as the app grows.
     Serialized as Extended JSON (bson.json_util) so ObjectId/date types are
     preserved exactly and round-trip through /import.
+
+    The AI settings (which hold the encrypted API key) are left out on
+    purpose; after a restore, set AI up again on its settings page.
     """
     all_data = {
         "_meta": {
@@ -3640,6 +3648,8 @@ def export_data():
         }
     }
     for name in sorted(db.list_collection_names()):
+        if name in EXPORT_EXCLUDED_COLLECTIONS:
+            continue
         all_data[name] = list(db[name].find())
     return jsonify(json.loads(dumps(all_data)))
 
@@ -3762,13 +3772,129 @@ def import_data():
     data.pop('_meta', None)
 
     for name, docs in data.items():
-        if not isinstance(docs, list):
+        if not isinstance(docs, list) or name in EXPORT_EXCLUDED_COLLECTIONS:
             continue
         db[name].drop()
         if docs:
             db[name].insert_many(docs)
 
     return redirect(url_for('ledger_page'))
+
+
+# ============ AI SETTINGS ============
+# Optional AI: provider, API key, models and which features use it. See ai.py.
+
+AI_FEATURE_KEYS = ('categorize', 'tips', 'report', 'scheduled_reports')
+
+
+def _ai_form_settings(existing):
+    """Read the AI settings form. Returns (settings, new_plain_key, errors).
+    A saved key is only kept when the provider is unchanged, so a key is never
+    sent to a different company than the one it was made for."""
+    existing = existing or {}
+    errors = []
+    provider = request.form.get('provider', 'none')
+    if provider != 'none' and provider not in ai.PROVIDERS:
+        provider = 'none'
+    new_key = (request.form.get(f'api_key_{provider}') or request.form.get('api_key') or '').strip()
+    out = {'provider': provider,
+           'features': {k: request.form.get('feature_' + k) == 'on' for k in AI_FEATURE_KEYS}}
+    if provider == 'none':
+        return out, '', errors
+    info = ai.PROVIDERS[provider]
+    for field, default in (('model_fast', info['default_fast']), ('model_report', info['default_report'])):
+        value = (request.form.get(f'{field}_{provider}') or '').strip()
+        allowed = [m['id'] for m in info['models']]
+        if allowed and value not in allowed:
+            value = default
+        out[field] = value[:100] or default
+    if provider == 'ollama':
+        url = (request.form.get('ollama_url') or '').strip().rstrip('/')
+        if not re.match(r'^https?://[^\s]+$', url):
+            errors.append('Enter the address of your Ollama server, e.g. http://localhost:11434.')
+        out['ollama_url'] = url
+        out['consent_provider'] = 'ollama'
+    else:
+        if request.form.get('consent') == 'on':
+            out['consent_provider'] = provider
+            out['consent_at'] = datetime.now()
+        else:
+            errors.append(f"Tick the box to confirm you understand what is sent to {info['company']}.")
+    same_provider = existing.get('provider') == provider
+    if new_key:
+        if info['key_prefix'] and not new_key.startswith(info['key_prefix']):
+            errors.append(f"That doesn't look like a {info['short']} API key "
+                          f"(those start with {' or '.join(info['key_prefix'])}). Check you copied the right one.")
+    elif same_provider and existing.get('api_key_enc') and ai.decrypt_key(existing['api_key_enc']):
+        out['api_key_enc'] = existing['api_key_enc']
+        out['api_key_hint'] = existing.get('api_key_hint', '')
+    elif provider != 'ollama':
+        errors.append(f"Paste your {info['short']} API key.")
+    return out, new_key, errors
+
+
+def _render_ai_settings(form_settings=None, errors=None, message=None, message_ok=None, status_code=200):
+    saved = ai.load_settings() or {}
+    shown = form_settings if form_settings is not None else saved
+    if not shown.get('features'):
+        shown = dict(shown, features=ai.default_features())
+    return render_template(
+        'ai_settings.html', s=shown, saved=saved, providers=ai.PROVIDERS,
+        cloud_providers=ai.CLOUD_PROVIDERS, status=ai.status(),
+        secret_ok=ai.secret_key_configured(), errors=errors or [],
+        message=message, message_ok=message_ok,
+        env_ollama=bool(os.environ.get('OLLAMA_URL') or os.environ.get('AGENT_OLLAMA_HOST')),
+    ), status_code
+
+
+@app.route('/settings/ai')
+def ai_settings_page():
+    saved = ai.load_settings() or {}
+    message = message_ok = None
+    if request.args.get('saved') and saved.get('last_test'):
+        message, message_ok = saved['last_test'].get('message'), saved['last_test'].get('ok')
+    elif request.args.get('off'):
+        message, message_ok = 'AI is turned off. Nothing is sent to any AI service.', True
+    return _render_ai_settings(message=message, message_ok=message_ok)
+
+
+@app.route('/settings/ai', methods=['POST'])
+def ai_settings_save():
+    action = request.form.get('action', 'save')
+    existing = ai.load_settings() or {}
+
+    if action == 'off':
+        ai.save_settings({'provider': 'none'})
+        return redirect(url_for('ai_settings_page', off=1))
+
+    if action == 'remove_key':
+        ai.save_settings({'provider': 'none', 'api_key_enc': '', 'api_key_hint': '',
+                          'consent_provider': None, 'last_test': None})
+        return redirect(url_for('ai_settings_page', off=1))
+
+    if action == 'test':
+        if not existing.get('provider') or existing.get('provider') == 'none':
+            return _render_ai_settings(message='AI is off, so there is nothing to test.', message_ok=False)
+        ok, msg = ai.test_connection(existing)
+        ai.save_settings({'last_test': {'ok': ok, 'message': msg, 'at': datetime.now()}})
+        return _render_ai_settings(message=msg, message_ok=ok)
+
+    settings, new_key, errors = _ai_form_settings(existing)
+    if settings['provider'] == 'none':
+        ai.save_settings({'provider': 'none', 'features': settings['features']})
+        return redirect(url_for('ai_settings_page', off=1))
+    if new_key and not ai.secret_key_configured():
+        errors.append('SECRET_KEY is not set for this app, so the key could not be stored safely. '
+                      'See the note at the top of this page.')
+    if errors:
+        return _render_ai_settings(form_settings=settings, errors=errors, status_code=400)
+    if new_key:
+        settings['api_key_enc'] = ai.encrypt_key(new_key)
+        settings['api_key_hint'] = ai.key_hint(new_key)
+    ok, msg = ai.test_connection(dict(settings, api_key=new_key) if new_key else settings)
+    settings['last_test'] = {'ok': ok, 'message': msg, 'at': datetime.now()}
+    ai.save_settings(settings)
+    return redirect(url_for('ai_settings_page', saved=1))
 
 
 # ============ ADMIN PAGE ============
@@ -3811,7 +3937,8 @@ def admin_page():
             orphan_recurring.append(f"Budget item '{rt.get('description', '?')}' references missing account {aid}")
     health_issues.extend(orphan_recurring)
 
-    return render_template('admin.html', stats=stats, health_issues=health_issues)
+    return render_template('admin.html', stats=stats, health_issues=health_issues,
+                           ai_status=ai.status())
 
 
 @app.route('/import/csv/transactions', methods=['POST'])
@@ -6340,18 +6467,10 @@ def credit_cards_page():
     )
 
 
-# Optional LLM used for credit-card categorization and AI spending analysis.
-# Any server exposing the Ollama-compatible /api/chat endpoint works (a plain
-# local Ollama, or a gateway in front of one). OLLAMA_API_KEY is sent as a
-# Bearer token when set; leave it blank for an unauthenticated local Ollama.
-# If the endpoint is unreachable, categorization logs a warning and falls back
-# to the keyword rules. The AI features are optional: with OLLAMA_URL unset
-# nothing here contacts an LLM.
-OLLAMA_URL = os.environ.get('OLLAMA_URL', '').strip().rstrip('/')
-OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'granite4.2:3b')
-OLLAMA_API_KEY = os.environ.get('OLLAMA_API_KEY', '')
-CC_LLM_TIMEOUT = int(os.environ.get('CC_LLM_TIMEOUT', '60'))
-CC_LLM_ENABLED = bool(OLLAMA_URL) and os.environ.get('CC_LLM_ENABLED', 'true').lower() == 'true'
+# Optional AI used for credit-card categorization and spending tips. Which
+# provider (Claude, ChatGPT, Gemini, Ollama) and whether each feature is on is
+# decided by ai.py from the AI settings page. With AI off, categorization uses
+# only the keyword rules and nothing contacts an LLM.
 # Every part of the shape below was measured rather than assumed,
 # against the merchants the keyword rules cannot resolve:
 #
@@ -6398,11 +6517,6 @@ def clean_descriptor(description):
     return re.sub(r'\s+', ' ', s).strip(' ,.-') or (description or '').strip()
 
 
-def _ollama_headers():
-    """Bearer auth for an LLM gateway; empty for an unauthenticated Ollama."""
-    return {'Authorization': f'Bearer {OLLAMA_API_KEY}'} if OLLAMA_API_KEY else {}
-
-
 def categorize_transaction(description):
     """Match transaction description against keyword rules. Returns category or 'Other'."""
     desc_upper = description.upper()
@@ -6420,32 +6534,24 @@ def categorize_transaction(description):
 def _llm_vote(cleaned, template):
     """One categorization vote. Returns a category from CC_CATEGORIES, or None.
 
-    think=False matters enormously here: with reasoning left on, a small local model spent
-    ~54s per description emitting an analysis it then discarded. Off, it answers
-    in well under a second. The response schema pins the enum, so a malformed or
-    invented category is not possible."""
-    import requests
+    Reasoning is kept minimal (on small local models it was the whole cost:
+    ~54s per description with it, well under a second without). The response
+    schema pins the enum, so a malformed or invented category is not possible."""
     schema = {
         'type': 'object',
         'properties': {'category': {'type': 'string', 'enum': CC_CATEGORIES}},
         'required': ['category'],
+        'additionalProperties': False,
     }
     prompt = template.format(cats=', '.join(CC_CATEGORIES), desc=cleaned)
-    resp = requests.post(f"{OLLAMA_URL}/api/chat", json={
-        'model': OLLAMA_MODEL,
-        'messages': [{'role': 'user', 'content': prompt}],
-        'stream': False,
-        'format': schema,
-        'think': False,
-        'options': {'temperature': 0, 'num_ctx': 2048},
-    }, headers=_ollama_headers(), timeout=CC_LLM_TIMEOUT)
-    if resp.status_code != 200:
-        # Loud on purpose: a dead or unauthenticated endpoint used to look
-        # identical to "the LLM had nothing to add".
-        logger.warning('LLM categorization unavailable: %s returned %s %s',
-                       OLLAMA_URL, resp.status_code, resp.text[:200])
+    try:
+        result = ai.generate('categorize', prompt, schema=schema)
+    except ai.AIError as e:
+        # Loud on purpose: a dead endpoint or bad key used to look identical
+        # to "the LLM had nothing to add".
+        logger.warning('AI categorization unavailable: %s', e)
         return None
-    category = json.loads(resp.json().get('message', {}).get('content', '')).get('category')
+    category = result.get('category') if isinstance(result, dict) else None
     return category if category in CC_CATEGORIES else None
 
 
@@ -6795,7 +6901,7 @@ def _categorize_leftovers_async():
     while one is in flight is a no-op, since the next run picks up whatever is
     still 'Other'."""
     global _CC_LLM_RUNNING
-    if not CC_LLM_ENABLED:
+    if not ai.enabled('categorize'):
         return
     with _CC_LLM_LOCK:
         if _CC_LLM_RUNNING:
@@ -6956,16 +7062,41 @@ def detect_subscription_overlap(query):
     return list(group_matches.values())
 
 
-def get_ollama_savings_tips(query, current_month):
-    """Get AI-powered savings tips from Ollama based on spending data."""
-    if not OLLAMA_URL:
+_SAVINGS_TIPS_SCHEMA = {
+    'type': 'object',
+    'properties': {
+        'tips': {
+            'type': 'array',
+            'items': {
+                'type': 'object',
+                'properties': {
+                    'title': {'type': 'string'},
+                    'detail': {'type': 'string'},
+                    'potential_savings': {'type': 'string'},
+                },
+                'required': ['title', 'detail', 'potential_savings'],
+                'additionalProperties': False,
+            },
+        },
+    },
+    'required': ['tips'],
+    'additionalProperties': False,
+}
+
+
+def get_ai_savings_tips(query, current_month):
+    """AI spending tips for the Cards page, or [] when AI tips are off."""
+    cfg = ai.get_config('tips')
+    if not cfg:
         return []
-    # Quick connectivity pre-check — skip expensive aggregation if Ollama is unreachable
-    try:
-        import requests
-        requests.get(f"{OLLAMA_URL}/api/tags", headers=_ollama_headers(), timeout=3)
-    except Exception:
-        return []
+    if cfg['provider'] == 'ollama':
+        # Quick reachability check, so a stopped local Ollama doesn't hold the
+        # page for the full request timeout.
+        try:
+            import requests
+            requests.get(f"{cfg['base_url']}/api/tags", timeout=3)
+        except Exception:
+            return []
 
     # Aggregate spending by category over last 6 months
     cat_pipeline = [
@@ -7012,31 +7143,18 @@ Spending by category per month:
 Top merchants by total spend:
 {json.dumps(merchant_summary, indent=2)}
 
-Return a JSON array of tips: [{{"title": "short title", "detail": "1-2 sentence explanation", "potential_savings": "$X/month"}}]
-Only return the JSON array, nothing else."""
+Return JSON: {{"tips": [{{"title": "short title", "detail": "1-2 sentence explanation", "potential_savings": "$X/month"}}]}}"""
 
     try:
-        import requests
-        resp = requests.post(f"{OLLAMA_URL}/api/chat", json={
-            'model': OLLAMA_MODEL,
-            'messages': [
-                {'role': 'system', 'content': 'You are a personal finance advisor. Analyze spending data and give specific, actionable savings tips. Only respond with valid JSON.'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'stream': False,
-            'format': 'json',
-            # Same reason as categorization: reasoning tokens dominate the cost
-            # on small local models and nothing here needs them.
-            'think': False
-        }, headers=_ollama_headers(), timeout=90)
-        data = resp.json()
-        content = data.get('message', {}).get('content', '')
-        results = json.loads(content)
-        if isinstance(results, dict):
-            results = results.get('tips', results.get('results', []))
-        return results[:5]
-    except Exception:
+        result = ai.generate(
+            'tips', prompt, schema=_SAVINGS_TIPS_SCHEMA,
+            system='You are a personal finance advisor. Analyze spending data and give '
+                   'specific, actionable savings tips. Only respond with valid JSON.')
+    except ai.AIError as e:
+        logger.warning('AI spending tips unavailable: %s', e)
         return []
+    tips = result.get('tips') if isinstance(result, dict) else result
+    return [t for t in (tips or []) if isinstance(t, dict)][:5]
 
 
 @app.route('/api/cc/savings-insights')
@@ -7061,7 +7179,7 @@ def cc_savings_insights():
 
     duplicates = detect_duplicate_charges(query)
     subscriptions = detect_subscription_overlap(query)
-    ai_tips = get_ollama_savings_tips(query, month_filter)
+    ai_tips = get_ai_savings_tips(query, month_filter)
 
     return jsonify({
         'duplicates': duplicates,
