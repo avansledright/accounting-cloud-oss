@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
 ### Added
 - One-command installers: `install.sh` (macOS, Linux) and `install.ps1`
   (Windows). They check for Docker, download the release's compose file,
@@ -129,6 +131,7 @@ finance app.
   months are inputs/config instead of fixed regional values.
 - Docker image runs gunicorn as a non-root user.
 
-[Unreleased]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/avansledright/accounting-cloud-oss/releases/tag/v0.1.0
