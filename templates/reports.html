@@ -161,6 +161,7 @@
 
 <div class="reports-header">
   <h1>AI Advisor</h1>
+  {% if advisor_configured %}
   <form class="regenerate-form" method="POST" action="{{ url_for('generate_reports') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <select name="report_type">
@@ -172,7 +173,20 @@
     </select>
     <button type="submit">Regenerate now</button>
   </form>
+  {% endif %}
 </div>
+
+{% if not advisor_configured %}
+<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;
+     padding:0.9rem 1.1rem;margin-bottom:1.25rem;font-size:0.92rem;line-height:1.5;">
+  <strong>The AI advisor is optional and turned off.</strong>
+  Everything else in the app works without it. To get weekly and monthly
+  briefings written by a language model, run <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>
+  (or any Ollama-compatible server), set <code>AGENT_OLLAMA_HOST</code> in your
+  <code>.env</code> file, and restart. See the
+  <a href="https://github.com/avansledright/accounting-cloud-oss/blob/main/docs/advisor-agent.md" target="_blank" rel="noopener">advisor docs</a>.
+</div>
+{% endif %}
 
 {% if jobs %}
 <div id="job-banner" style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;

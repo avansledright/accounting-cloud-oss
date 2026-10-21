@@ -14,10 +14,11 @@ data:
   # Time zone for the 17:00 price refresh, the report scheduler and "today".
   # The image defaults to UTC; uncomment and set yours (applies to web and MCP).
   # TZ: "America/New_York"
-  # Optional LLM endpoints (Ollama-compatible). Leave as-is to disable gracefully.
-  OLLAMA_URL: "http://ollama.ollama.svc.cluster.local:11434"
+  # Optional AI (Ollama-compatible endpoints). Off while the hosts are empty;
+  # e.g. "http://ollama.ollama.svc.cluster.local:11434" for an in-cluster Ollama.
+  OLLAMA_URL: ""
   OLLAMA_MODEL: "granite4.2:3b"
   CC_LLM_ENABLED: "true"
   ADVISOR_ENABLED: "false"
-  AGENT_OLLAMA_HOST: "http://ollama.ollama.svc.cluster.local:11434"
+  AGENT_OLLAMA_HOST: ""
   AGENT_OLLAMA_MODEL: "gemma4:e4b"

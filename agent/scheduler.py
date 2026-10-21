@@ -54,10 +54,15 @@ def schedule_reports():
 
     Disabled unless ADVISOR_ENABLED=true, so a fresh install without an LLM
     doesn't fill the reports collection with insight-less entries. Reports
-    can still be generated on demand from the Reports page.
+    can still be generated on demand from the Reports page once
+    AGENT_OLLAMA_HOST is set.
     """
     if os.environ.get('ADVISOR_ENABLED', 'false').lower() != 'true':
         logger.info("Report scheduler disabled (set ADVISOR_ENABLED=true to enable)")
+        return
+    if not os.environ.get('AGENT_OLLAMA_HOST', '').strip():
+        logger.warning("ADVISOR_ENABLED=true but AGENT_OLLAMA_HOST is not set; "
+                       "report scheduler disabled")
         return
 
     def report_loop():

@@ -105,7 +105,7 @@ but the page shows no write-up.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `AGENT_OLLAMA_HOST` | `http://localhost:11434` | Base URL of the Ollama-compatible server (trailing slash stripped). From inside Docker, a host-run Ollama is usually `http://host.docker.internal:11434`. |
+| `AGENT_OLLAMA_HOST` | empty (AI off) | Base URL of the Ollama-compatible server (trailing slash stripped). From inside Docker, a host-run Ollama is usually `http://host.docker.internal:11434`. |
 | `AGENT_OLLAMA_MODEL` | `gemma4:e4b` | Model name. |
 | `AGENT_OLLAMA_API_KEY` | empty | When set, sent as `Authorization: Bearer <key>`. Leave blank for plain Ollama. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | Request timeout in seconds. |

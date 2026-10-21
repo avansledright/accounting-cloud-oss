@@ -224,7 +224,8 @@ def reports_page():
         jobs = {k: dict(v) for k, v in _REPORT_JOBS.items()}
 
     return render_template('reports.html', weekly=weekly, monthly=monthly,
-                           portfolio=portfolio, history=history, jobs=jobs)
+                           portfolio=portfolio, history=history, jobs=jobs,
+                           advisor_configured=agent_reports.llm_configured())
 
 
 @app.route('/api/reports/status')
@@ -261,11 +262,14 @@ def report_detail(report_id):
                            weekly=report if report['type']=='weekly' else None,
                            monthly=report if report['type']=='monthly' else None,
                            portfolio=report if report['type']=='portfolio' else None,
-                           history=history, viewing_id=str(rid))
+                           history=history, viewing_id=str(rid),
+                           advisor_configured=agent_reports.llm_configured())
 
 
 @app.route('/api/reports/generate', methods=['POST'])
 def generate_reports():
+    if not agent_reports.llm_configured():
+        return redirect(url_for('reports_page'))
     report_type = request.form.get('report_type', 'both')
     if report_type in ('weekly', 'both', 'all'):
         _run_report_async('weekly')
@@ -6341,12 +6345,13 @@ def credit_cards_page():
 # local Ollama, or a gateway in front of one). OLLAMA_API_KEY is sent as a
 # Bearer token when set; leave it blank for an unauthenticated local Ollama.
 # If the endpoint is unreachable, categorization logs a warning and falls back
-# to the keyword rules.
-OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+# to the keyword rules. The AI features are optional: with OLLAMA_URL unset
+# nothing here contacts an LLM.
+OLLAMA_URL = os.environ.get('OLLAMA_URL', '').strip().rstrip('/')
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'granite4.2:3b')
 OLLAMA_API_KEY = os.environ.get('OLLAMA_API_KEY', '')
 CC_LLM_TIMEOUT = int(os.environ.get('CC_LLM_TIMEOUT', '60'))
-CC_LLM_ENABLED = os.environ.get('CC_LLM_ENABLED', 'true').lower() == 'true'
+CC_LLM_ENABLED = bool(OLLAMA_URL) and os.environ.get('CC_LLM_ENABLED', 'true').lower() == 'true'
 # Every part of the shape below was measured rather than assumed,
 # against the merchants the keyword rules cannot resolve:
 #
@@ -6953,6 +6958,8 @@ def detect_subscription_overlap(query):
 
 def get_ollama_savings_tips(query, current_month):
     """Get AI-powered savings tips from Ollama based on spending data."""
+    if not OLLAMA_URL:
+        return []
     # Quick connectivity pre-check — skip expensive aggregation if Ollama is unreachable
     try:
         import requests

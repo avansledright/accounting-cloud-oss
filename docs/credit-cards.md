@@ -164,7 +164,7 @@ plain local Ollama, or a gateway in front of one.
 | Variable | Default | Purpose |
 |---|---|---|
 | `CC_LLM_ENABLED` | `true` | Set to anything other than `true` to disable the categorisation pass entirely |
-| `OLLAMA_URL` | `http://localhost:11434` | Base URL of the Ollama-compatible server |
+| `OLLAMA_URL` | empty (AI off) | Base URL of the Ollama-compatible server |
 | `OLLAMA_MODEL` | `granite4.2:3b` | Model name passed in each request |
 | `OLLAMA_API_KEY` | empty | Sent as `Authorization: Bearer <key>` when set; leave blank for an unauthenticated Ollama |
 | `CC_LLM_TIMEOUT` | `60` | Per-request timeout in seconds |

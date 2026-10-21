@@ -345,13 +345,13 @@ All configuration is through environment variables (in Docker Compose, the
 | `ESCROW_PROPERTY_TAX_MONTHS` | `6,12` | web | Months the escrow simulation pays property tax (annual bill split evenly). |
 | `ESCROW_INSURANCE_MONTH` | `1` | web | Month the escrow simulation pays homeowner's insurance. |
 | `ALPHA_VANTAGE_KEY` | empty | web | Fallback market-data key (Yahoo needs none). |
-| `OLLAMA_URL` | `http://localhost:11434` | web | Ollama-compatible endpoint for categorization and spending tips. |
+| `OLLAMA_URL` | empty (AI off) | web | Ollama-compatible endpoint for categorization and spending tips. |
 | `OLLAMA_MODEL` | `granite4.2:3b` | web | Model for categorization. |
 | `OLLAMA_API_KEY` | empty | web | Optional bearer token for that endpoint. |
 | `CC_LLM_ENABLED` | `true` | web | Enable the LLM categorization pass. |
 | `CC_LLM_TIMEOUT` | `60` | web | Seconds per categorization request. |
 | `ADVISOR_ENABLED` | `false` | web | Run the weekly/monthly advisor report scheduler. |
-| `AGENT_OLLAMA_HOST` | `http://localhost:11434` | web, mcp | Endpoint for advisor reports. |
+| `AGENT_OLLAMA_HOST` | empty (AI off) | web, mcp | Endpoint for advisor reports. |
 | `AGENT_OLLAMA_MODEL` | `gemma4:e4b` | web, mcp | Model for advisor reports. |
 | `AGENT_OLLAMA_API_KEY` | empty | web, mcp | Optional bearer token for that endpoint. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | web, mcp | Seconds to wait for a report. |

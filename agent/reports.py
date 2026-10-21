@@ -27,11 +27,17 @@ logger = logging.getLogger(__name__)
 # Any server exposing the Ollama-compatible /api/chat endpoint works. This can
 # be a different (bigger, slower) model than the one used for credit-card
 # categorization (OLLAMA_URL / OLLAMA_MODEL in app.py), since reports run in
-# a background thread and nobody waits on them.
-OLLAMA_HOST = os.environ.get('AGENT_OLLAMA_HOST', 'http://localhost:11434').rstrip('/')
+# a background thread and nobody waits on them. Optional: with
+# AGENT_OLLAMA_HOST unset, advisor reports are off.
+OLLAMA_HOST = os.environ.get('AGENT_OLLAMA_HOST', '').strip().rstrip('/')
 OLLAMA_MODEL = os.environ.get('AGENT_OLLAMA_MODEL', 'gemma4:e4b')
 OLLAMA_API_KEY = os.environ.get('AGENT_OLLAMA_API_KEY', '')
 OLLAMA_TIMEOUT = int(os.environ.get('AGENT_OLLAMA_TIMEOUT', '3600'))
+
+
+def llm_configured() -> bool:
+    """True when an LLM endpoint for advisor reports is set (AGENT_OLLAMA_HOST)."""
+    return bool(OLLAMA_HOST)
 
 
 def _call_ollama(prompt: str) -> str | None:
@@ -41,6 +47,8 @@ def _call_ollama(prompt: str) -> str | None:
     time doesn't affect the request UX. We let the model run as long as it
     needs — the timeout is generous on purpose.
     """
+    if not OLLAMA_HOST:
+        return None
     try:
         resp = requests.post(
             f"{OLLAMA_HOST}/api/chat",

@@ -1,9 +1,97 @@
 # Accounting Cloud
 
-A self-hosted personal finance app for one household: budget, ledger with a
-12-month cash-flow projection, accounts, credit card statements, portfolio,
-debts, goals, net worth, workplace benefits and card perks, a home-move
-planner, plus an MCP server so AI assistants can read and update your data.
+Free, private household finances that run on your own computer: budget,
+bills, a 12-month look ahead at every account, credit card statements,
+investments, debts, goals and net worth. No subscription, no ads, no account
+to sign up for, and your data never leaves your machine.
+
+## Quickstart
+
+You don't need to be technical. It takes about 10 minutes, most of it
+waiting for downloads.
+
+**What you need:** a Windows, Mac or Linux computer with a few GB of free
+disk space.
+
+### 1. Install Docker Desktop
+
+Docker Desktop is a free app (for personal use) that runs Accounting Cloud
+for you.
+
+- Download it from **<https://www.docker.com/products/docker-desktop/>** and
+  install it like any other app. Windows may ask you to restart.
+- Open Docker Desktop and wait until it says the engine is **running**. If it
+  asks you to sign in or create an account, you can skip that.
+- Linux: install [Docker Engine](https://docs.docker.com/engine/install/)
+  instead if you prefer; either works.
+
+### 2. Open a terminal
+
+- **Mac:** press <kbd>⌘ Cmd</kbd> + <kbd>Space</kbd>, type `Terminal`, press
+  <kbd>Enter</kbd>.
+- **Windows:** open the Start menu, type `PowerShell`, press <kbd>Enter</kbd>.
+- **Linux:** open your Terminal app.
+
+### 3. Paste one line and press Enter
+
+**Mac or Linux:**
+
+```bash
+curl -fsSL https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.sh | sh
+```
+
+**Windows:**
+
+```powershell
+irm https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.ps1 | iex
+```
+
+The first run downloads the app (a couple of minutes), then your browser
+opens to **<http://localhost:5052>**.
+
+### 4. Follow the setup wizard
+
+The wizard asks for your main checking account, your paychecks and your
+regular bills, then shows your next 12 months. Just want to look around?
+Click **Load demo data instead** on the first page.
+
+### Using it day to day
+
+- **Open it:** go to <http://localhost:5052> (bookmark it). Windows also gets
+  an **Accounting Cloud** shortcut on the desktop and in the Start menu.
+  Docker Desktop has to be running; turn on *Start Docker Desktop when you
+  sign in* in its settings so you never have to think about it.
+- **Update:** paste the same line from step 3 again. Your data is kept.
+- **Back up:** in a terminal, run the line for your computer. It saves a
+  backup file in the `accounting-cloud` folder in your home folder; copy it
+  somewhere safe.
+  - Mac or Linux: `~/accounting-cloud/accounting-cloud backup`
+  - Windows: `cd ~\accounting-cloud; .\accounting-cloud backup`
+- **Remove:** the same, with `uninstall` instead of `backup`. Add
+  `--delete-data` at the end to erase your data too.
+
+**Good to know**
+
+- It only opens on the computer you installed it on, and it has **no
+  password**. Anyone using that computer can see it. To reach it from your
+  phone or another computer, see [docs/deployment.md](docs/deployment.md);
+  that part is for technical users.
+- The AI features are **optional and off**. Nothing is sent to any AI
+  service unless you set one up yourself.
+- The only things it reaches out to the internet for are stock prices and
+  mortgage rates.
+- Stuck? [Open an issue](https://github.com/avansledright/accounting-cloud-oss/issues)
+  and describe what you see (never include real financial details).
+
+A longer walkthrough with the core concepts and your first week of use is in
+[docs/getting-started.md](docs/getting-started.md).
+
+---
+
+# For self-hosters and developers
+
+Everything below is the technical detail: what's inside, other ways to run
+it, configuration and architecture.
 
 Built with Flask, MongoDB and server-rendered Jinja2 templates. No cloud
 services required; the optional AI features work with any Ollama-compatible
@@ -45,7 +133,7 @@ data set (`scripts/seed_demo.py`)._
   both sides.
 - **Credit card statements**: CSV import (Chase, Citi, Amex and a generic
   format) with de-duplication, refunds netted as credits, keyword
-  categorization, an optional two-vote LLM pass for unknown merchants,
+  categorization (plus an optional AI pass for unknown merchants),
   subscription detection, payment plans, and missing-statement checks.
   [docs](docs/credit-cards.md)
 - **Portfolio**: holdings with live prices and dividend history from Yahoo
@@ -72,45 +160,42 @@ data set (`scripts/seed_demo.py`)._
 - **Analytics, calendar and history** views of spending and upcoming bills.
 - **Household payroll**: wages and taxes for a household employee, W-2,
   Schedule H and SSA EFW2 export with a local validator.
-- **MCP server**: about 50 read and write tools over stateless streamable
+- **MCP server** (optional): about 50 read and write tools over stateless streamable
   HTTP with bearer-token auth, for Claude and other MCP clients.
   [docs](docs/mcp-server.md)
-- **Advisor agent**: optional weekly, monthly and portfolio briefings written
-  by a local LLM from your data and a household profile you provide.
+- **AI extras** (optional, off by default): weekly, monthly and portfolio
+  briefings written by a local LLM from your data, smarter categorization of
+  unknown merchants, and spending tips. They need an Ollama-compatible
+  server you run yourself; without one, everything else works the same.
+  [docs](docs/advisor-agent.md)
   [docs](docs/advisor-agent.md)
 
 A page-by-page tour is in [docs/features.md](docs/features.md).
 
-## Quick start
+## Installing
 
-> **New here? Follow [docs/getting-started.md](docs/getting-started.md)**: a
-> step-by-step walkthrough from install to the setup wizard and your first
-> week of use, with the core concepts explained.
+### The installer
 
-Requires [Docker Desktop](https://docs.docker.com/desktop/) (Windows, Mac) or
-Docker Engine with the Compose plugin (Linux). Then run one command:
+The Quickstart commands download `install.sh` (macOS, Linux) or `install.ps1`
+(Windows) from the latest release. They need Docker with the Compose plugin
+and:
 
-**macOS / Linux:**
+- create `~/accounting-cloud` with the release's `docker-compose.yml` (pinned
+  to that version's image, `ghcr.io/avansledright/accounting-cloud`), a `.env`
+  with a random `SECRET_KEY`, your time zone and `WEB_PORT`, and an
+  `accounting-cloud` helper (`start|stop|status|logs|open|update|backup|uninstall`);
+- pull and start the stack (Compose project `accountingcloud`), then open the
+  browser;
+- keep `.env` and the data volumes when run again, so re-running updates;
+- refuse a first install if `accountingcloud` data volumes already exist,
+  unless `ACCOUNTING_CLOUD_REUSE_DATA=1`.
 
-```bash
-curl -fsSL https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.sh | sh
-```
+Options (environment variables): `ACCOUNTING_CLOUD_DIR`,
+`ACCOUNTING_CLOUD_VERSION` (e.g. `0.3.0`), `WEB_PORT`, `NO_BROWSER=1`.
+Everything in [docs/deployment.md](docs/deployment.md) applies; run the
+`docker compose` commands in the install folder.
 
-**Windows** (in PowerShell):
-
-```powershell
-irm https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.ps1 | iex
-```
-
-The installer puts everything in an `accounting-cloud` folder in your home
-directory. It generates the secret key, picks up your time zone, downloads
-and starts the app, then opens <http://localhost:5052>. Run it again to
-update; your settings and data are kept. Afterwards, manage the app with
-`~/accounting-cloud/accounting-cloud start|stop|update|backup|uninstall`
-(Windows: `.\accounting-cloud` in that folder, or use the **Accounting Cloud**
-shortcut).
-
-From a clone instead:
+### From a clone
 
 ```bash
 git clone https://github.com/avansledright/accounting-cloud-oss.git
@@ -121,27 +206,27 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 docker compose up -d --build
 ```
 
-Open <http://localhost:5052>. A fresh install starts a short **setup
-wizard**: your primary checking account, recurring income, regular bills and
-optional extras. The ledger then shows a 12-month projection, and a
-getting-started checklist on the dashboard covers the rest.
-
-Want to look around first? Click **Load demo data instead** on the wizard's
-first page, or from the command line:
+Open <http://localhost:5052>. A fresh install starts the setup wizard. Demo
+data from the command line (in the install folder or clone):
 
 ```bash
-docker compose exec web python scripts/seed_demo.py   # run in the install folder or clone
+docker compose exec web python scripts/seed_demo.py
 ```
 
-Optional extras:
+Kubernetes manifests, reverse-proxy examples, backups and upgrades:
+[docs/deployment.md](docs/deployment.md). Running without Docker, and running
+the tests: [docs/development.md](docs/development.md).
 
-```bash
-# MCP server for AI clients (set MCP_API_TOKEN in .env first)
-docker compose --profile mcp up -d
-```
+### Optional extras
 
-Running without Docker, and running the tests, is covered in
-[docs/development.md](docs/development.md).
+- **AI features:** run [Ollama](https://ollama.com) (or any
+  Ollama-compatible server) and set `OLLAMA_URL` (card categorization and
+  spending tips) and/or `AGENT_OLLAMA_HOST` (advisor reports) in `.env`, then
+  restart. Leave them blank and no AI endpoint is ever contacted.
+  [docs](docs/advisor-agent.md)
+- **MCP server** for AI clients such as Claude: set `MCP_API_TOKEN` in
+  `.env`, then `docker compose --profile mcp up -d`.
+  [docs](docs/mcp-server.md)
 
 ## Configuration
 
@@ -161,13 +246,13 @@ are optional except `SECRET_KEY`, which you should always set.
 | `ESCROW_PROPERTY_TAX_MONTHS` | `6,12` | Months the escrow simulation pays property tax. |
 | `ESCROW_INSURANCE_MONTH` | `1` | Month the escrow simulation pays homeowner's insurance. |
 | `ALPHA_VANTAGE_KEY` | empty | Fallback market-data API key; Yahoo Finance needs none. |
-| `OLLAMA_URL` | `http://localhost:11434` | Ollama-compatible endpoint for card categorization and spending tips. |
+| `OLLAMA_URL` | empty (AI off) | Ollama-compatible endpoint for card categorization and spending tips. |
 | `OLLAMA_MODEL` | `granite4.2:3b` | Model for categorization (small and fast is fine). |
 | `OLLAMA_API_KEY` | empty | Sent as a bearer token if set. |
 | `CC_LLM_ENABLED` | `true` | Turn the LLM categorization pass on or off. |
 | `CC_LLM_TIMEOUT` | `60` | Seconds per categorization request. |
 | `ADVISOR_ENABLED` | `false` | Run the scheduled advisor reports (Mondays and the 1st, 06:00). |
-| `AGENT_OLLAMA_HOST` | `http://localhost:11434` | Endpoint for advisor reports. |
+| `AGENT_OLLAMA_HOST` | empty (AI off) | Endpoint for advisor reports. |
 | `AGENT_OLLAMA_MODEL` | `gemma4:e4b` | Model for advisor reports. |
 | `AGENT_OLLAMA_API_KEY` | empty | Bearer token for the advisor endpoint. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | Seconds to wait for a report. |

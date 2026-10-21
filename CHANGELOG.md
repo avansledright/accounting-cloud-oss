@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The AI features are off unless an endpoint is set: `OLLAMA_URL` and
+  `AGENT_OLLAMA_HOST` now default to empty (they used to default to
+  `http://localhost:11434`). With them blank, card categorization uses only
+  the keyword rules, spending tips are skipped, advisor reports can't be
+  started (the AI Advisor page says how to turn them on, and the MCP report
+  tools say they are off), and nothing contacts an LLM. `.env.example` and
+  the Kubernetes ConfigMap ship with them blank. Installs that set an
+  endpoint are unaffected.
+- README: a plain-language Quickstart for non-technical users first, with
+  the technical material below it.
+
 ## [0.3.0] - 2026-10-21
 
 ### Added

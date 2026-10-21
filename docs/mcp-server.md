@@ -68,7 +68,7 @@ For Kubernetes, see [deployment.md](deployment.md) and `deploy/kubernetes/mcp.ya
 | `MCP_PORT` | `8765` | Bind port. |
 | `MCP_MOUNT_PATH` | empty | Public path prefix when a reverse proxy serves the server under a sub-path and strips it (for example `/accounting-mcp`). It is passed to the SSE app so the message endpoint it advertises to clients includes the prefix. Leave empty for direct access. |
 | `MCP_API_TOKEN` | empty | Bearer token required on every request. **Required**: with no token the server refuses everything with 503. |
-| `AGENT_OLLAMA_HOST` | `http://localhost:11434` | Ollama-compatible server used by the two report tools. |
+| `AGENT_OLLAMA_HOST` | empty (AI off) | Ollama-compatible server used by the two report tools. |
 | `AGENT_OLLAMA_MODEL` | `gemma4:e4b` | Model for the report tools. |
 | `AGENT_OLLAMA_API_KEY` | empty | Sent as `Authorization: Bearer ...` to the LLM server when set. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | Seconds to wait for one report generation. |
