@@ -1,8 +1,9 @@
 # Getting started
 
-This walkthrough takes you from `git clone` to a working household ledger and
-through the first week of use. It assumes Docker with the Compose plugin. To
-run from source instead, see [development.md](development.md).
+This walkthrough takes you from install to a working household ledger and
+through the first week of use. It assumes Docker: Docker Desktop on Windows
+and Mac, Docker Engine with the Compose plugin on Linux. To run from source
+instead, see [development.md](development.md).
 
 - [1. Install](#1-install)
 - [2. Put it behind authentication](#2-put-it-behind-authentication)
@@ -13,6 +14,46 @@ run from source instead, see [development.md](development.md).
 - [Starting over](#starting-over)
 
 ## 1. Install
+
+### The installer (easiest)
+
+Install [Docker Desktop](https://docs.docker.com/desktop/) (Windows, Mac) or
+Docker Engine (Linux), start it once, then run:
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.sh | sh
+```
+
+**Windows** (in PowerShell):
+
+```powershell
+irm https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.ps1 | iex
+```
+
+It creates an `accounting-cloud` folder in your home directory with three
+files you might look at:
+
+| File | What it is |
+|---|---|
+| `.env` | Your settings. The installer writes a random `SECRET_KEY`, your time zone (`TZ`) and the port (`WEB_PORT`, 5052). Other options are in [.env.example](../.env.example). |
+| `docker-compose.yml` | The app, pinned to the release you installed. Replaced on update. |
+| `accounting-cloud` | A helper: `start`, `stop`, `status`, `logs`, `open`, `update`, `backup` and `uninstall` (Windows: `accounting-cloud.cmd`). |
+
+When it finishes, your browser opens <http://localhost:5052>. On Windows
+there is also an **Accounting Cloud** shortcut on the desktop and in the Start
+menu; on Linux, in the applications menu. The app restarts by itself
+whenever Docker starts.
+
+Installer options, set as environment variables before running it:
+`ACCOUNTING_CLOUD_DIR` (install folder), `ACCOUNTING_CLOUD_VERSION` (a
+specific release, e.g. `0.3.0`), `WEB_PORT` (if 5052 is taken) and
+`NO_BROWSER=1`.
+
+Skip to [2. Put it behind authentication](#2-put-it-behind-authentication).
+
+### From a clone
 
 ```bash
 git clone https://github.com/avansledright/accounting-cloud-oss.git
@@ -214,6 +255,9 @@ the wizard back, remove the database volume:
 docker compose down -v      # deletes ALL data in this stack, including uploaded statements
 docker compose up -d
 ```
+
+With the installer, run those two commands in the install folder, or
+`accounting-cloud uninstall --delete-data` and then the installer again.
 
 To keep your data and just walk the wizard again, use **Admin → Re-run setup
 wizard** instead.

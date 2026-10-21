@@ -24,7 +24,7 @@ spec:
         runAsUser: 10001
       containers:
       - name: accounting-mcp
-        image: ghcr.io/your-user/accounting-cloud:latest
+        image: ghcr.io/avansledright/accounting-cloud:latest
         command: ["python", "mcp_server.py"]
         ports:
         - containerPort: 8765

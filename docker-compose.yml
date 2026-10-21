@@ -4,6 +4,11 @@
 #   docker compose up -d --build
 #   open http://localhost:5052
 #
+# --build builds the image from this checkout. Without it, Compose uses the
+# published image (ghcr.io/avansledright/accounting-cloud), pinned with
+# ACCOUNTING_CLOUD_VERSION. The one-command installer (install.sh /
+# install.ps1) uses a copy of this file with the build lines removed.
+#
 # Optional MCP server for AI clients:
 #   docker compose --profile mcp up -d --build
 #
@@ -15,7 +20,7 @@
 services:
   web:
     build: .
-    image: accounting-cloud:latest
+    image: ghcr.io/avansledright/accounting-cloud:${ACCOUNTING_CLOUD_VERSION:-latest}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WEB_PORT:-5052}:5000"
@@ -40,7 +45,7 @@ services:
 
   mcp:
     profiles: ["mcp"]
-    image: accounting-cloud:latest
+    image: ghcr.io/avansledright/accounting-cloud:${ACCOUNTING_CLOUD_VERSION:-latest}
     build: .
     command: ["python", "mcp_server.py"]
     restart: unless-stopped

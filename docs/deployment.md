@@ -16,6 +16,13 @@
 
 Requirements: Docker Engine with the Compose plugin (v2.24 or newer).
 
+The one-command installer
+([getting-started.md](getting-started.md#the-installer-easiest)) sets this up
+with the published image in `~/accounting-cloud`. Everything in this section
+applies to it too; run the `docker compose` commands in that folder.
+
+From a clone:
+
 ```bash
 git clone https://github.com/avansledright/accounting-cloud-oss.git
 cd accounting-cloud-oss
@@ -43,7 +50,7 @@ document in the collections it seeds, so never use it on real data.
 
 | Service | Image | Purpose | Persistent data |
 |---|---|---|---|
-| `web` | built from `Dockerfile` | Flask app under gunicorn (1 worker, 8 threads), port 5000 in the container, `127.0.0.1:${WEB_PORT:-5052}` on the host | `cc_statements` volume (uploaded statement CSVs) |
+| `web` | `ghcr.io/avansledright/accounting-cloud` (or built from `Dockerfile` with `--build`) | Flask app under gunicorn (1 worker, 8 threads), port 5000 in the container, `127.0.0.1:${WEB_PORT:-5052}` on the host | `cc_statements` volume (uploaded statement CSVs) |
 | `db` | `mongo:7.0` | MongoDB, internal network only, no auth | `mongo_data` volume |
 | `mcp` (profile `mcp`) | same image | MCP server for AI clients, `127.0.0.1:${MCP_PORT:-8765}` | none |
 
@@ -218,10 +225,11 @@ Generic manifests live in [`deploy/kubernetes/`](../deploy/kubernetes):
 | `kustomization.yaml` | applies everything except ingress and MCP |
 
 ```bash
-# 1. Build and push the image somewhere your cluster can pull from
-docker build -t registry.example.com/accounting-cloud:0.1.0 .
-docker push registry.example.com/accounting-cloud:0.1.0
-#    then set that image in deployment.yaml and mcp.yaml
+# 1. Image: deployment.yaml and mcp.yaml use the published
+#    ghcr.io/avansledright/accounting-cloud. Pin a release tag (e.g. :0.3.0)
+#    instead of :latest, or build and push your own:
+#      docker build -t registry.example.com/accounting-cloud:0.3.0 .
+#      docker push registry.example.com/accounting-cloud:0.3.0
 
 # 2. Secret
 kubectl create namespace accounting
@@ -298,6 +306,17 @@ run the script on the host against `http://127.0.0.1:5052/export` or prefer
 `mongodump`.
 
 ## Upgrading
+
+Installer:
+
+```bash
+~/accounting-cloud/accounting-cloud update     # Windows: .\accounting-cloud update in the install folder
+```
+
+This re-runs the latest installer: it replaces `docker-compose.yml` with the
+new release's copy, keeps `.env` and the data volumes, pulls and restarts.
+
+From a clone:
 
 ```bash
 git pull

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- One-command installers: `install.sh` (macOS, Linux) and `install.ps1`
+  (Windows). They check for Docker, download the release's compose file,
+  write `.env` with a random `SECRET_KEY` and the local time zone, start the
+  app and open the browser. Re-running updates and keeps settings and data.
+  An `accounting-cloud` helper in the install folder starts, stops, updates,
+  backs up and uninstalls; Windows also gets Start menu and desktop shortcuts.
+  A first install refuses to attach to existing data volumes of the same
+  project unless `ACCOUNTING_CLOUD_REUSE_DATA=1`.
+- Release workflow: each `v*` tag publishes a multi-arch (amd64, arm64) image
+  to `ghcr.io/avansledright/accounting-cloud` and attaches `install.sh`,
+  `install.ps1` and a pinned `docker-compose.yml` to the GitHub release.
+- CI runs both installers end to end.
+
+### Changed
+- `docker-compose.yml` names the published image (version from
+  `ACCOUNTING_CLOUD_VERSION`, default `latest`); `--build` still builds from
+  the checkout. The Kubernetes manifests point at the published image.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

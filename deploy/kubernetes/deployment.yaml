@@ -41,7 +41,7 @@ spec:
       - name: accounting
         # Build and push the image yourself (see docs/deployment.md), or use the
         # image published by this repo's CI if you enable that.
-        image: ghcr.io/your-user/accounting-cloud:latest
+        image: ghcr.io/avansledright/accounting-cloud:latest
         ports:
         - containerPort: 5000
           name: http

@@ -87,7 +87,30 @@ A page-by-page tour is in [docs/features.md](docs/features.md).
 > step-by-step walkthrough from install to the setup wizard and your first
 > week of use, with the core concepts explained.
 
-Requires Docker with the Compose plugin.
+Requires [Docker Desktop](https://docs.docker.com/desktop/) (Windows, Mac) or
+Docker Engine with the Compose plugin (Linux). Then run one command:
+
+**macOS / Linux:**
+
+```bash
+curl -fsSL https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.sh | sh
+```
+
+**Windows** (in PowerShell):
+
+```powershell
+irm https://github.com/avansledright/accounting-cloud-oss/releases/latest/download/install.ps1 | iex
+```
+
+The installer puts everything in an `accounting-cloud` folder in your home
+directory. It generates the secret key, picks up your time zone, downloads
+and starts the app, then opens <http://localhost:5052>. Run it again to
+update; your settings and data are kept. Afterwards, manage the app with
+`~/accounting-cloud/accounting-cloud start|stop|update|backup|uninstall`
+(Windows: `.\accounting-cloud` in that folder, or use the **Accounting Cloud**
+shortcut).
+
+From a clone instead:
 
 ```bash
 git clone https://github.com/avansledright/accounting-cloud-oss.git
@@ -107,7 +130,7 @@ Want to look around first? Click **Load demo data instead** on the wizard's
 first page, or from the command line:
 
 ```bash
-docker compose exec web python scripts/seed_demo.py
+docker compose exec web python scripts/seed_demo.py   # run in the install folder or clone
 ```
 
 Optional extras:

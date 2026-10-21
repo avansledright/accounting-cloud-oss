@@ -25,6 +25,44 @@ jobs:
       - name: Unit tests
         run: pytest -q tests
 
+  installers:
+    # Runs install.sh and install.ps1 against a locally built image, the way
+    # the release workflow packages them, then uninstalls.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint shell scripts
+        run: shellcheck install.sh scripts/release/release-compose.sh
+      - name: Build the image and the release files
+        run: |
+          docker build -q -t ghcr.io/avansledright/accounting-cloud:ci .
+          mkdir rel
+          scripts/release/release-compose.sh ci > rel/docker-compose.yml
+          cp install.sh install.ps1 rel/
+      - name: install.sh
+        env:
+          ACCOUNTING_CLOUD_DIR: ${{ runner.temp }}/ac-sh
+          ACCOUNTING_CLOUD_BASE_URL: file://${{ github.workspace }}/rel
+          ACCOUNTING_CLOUD_SKIP_PULL: "1"
+          NO_BROWSER: "1"
+        run: |
+          sh rel/install.sh
+          curl -fsS http://127.0.0.1:5052/health
+          sh rel/install.sh | grep -q "Keeping existing"     # re-run keeps settings
+          "$ACCOUNTING_CLOUD_DIR/accounting-cloud" backup
+          "$ACCOUNTING_CLOUD_DIR/accounting-cloud" uninstall --delete-data
+      - name: install.ps1 (PowerShell 7 on Linux; shortcuts are Windows-only)
+        env:
+          ACCOUNTING_CLOUD_DIR: ${{ runner.temp }}/ac-ps
+          ACCOUNTING_CLOUD_BASE_URL: ${{ github.workspace }}/rel
+          ACCOUNTING_CLOUD_SKIP_PULL: "1"
+          NO_BROWSER: "1"
+          WEB_PORT: "5053"
+        run: |
+          pwsh -NoProfile -Command 'Get-Content -Raw rel/install.ps1 | Invoke-Expression'
+          curl -fsS http://127.0.0.1:5053/health
+          pwsh -NoProfile -File "$ACCOUNTING_CLOUD_DIR/accounting-cloud-cli.ps1" uninstall --delete-data
+
   docker-smoke:
     runs-on: ubuntu-latest
     steps:
