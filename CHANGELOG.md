@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-21
+
 ### Added
 - AI settings page (**Admin → AI settings**, `/settings/ai`): choose Claude
   (Anthropic), ChatGPT (OpenAI), Gemini (Google) or Ollama, paste an API key,
@@ -168,7 +170,8 @@ finance app.
   months are inputs/config instead of fixed regional values.
 - Docker image runs gunicorn as a non-root user.
 
-[Unreleased]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/avansledright/accounting-cloud-oss/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/avansledright/accounting-cloud-oss/releases/tag/v0.1.0
