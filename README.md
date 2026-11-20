@@ -165,7 +165,7 @@ data set (`scripts/seed_demo.py`)._
 - **Analytics, calendar and history** views of spending and upcoming bills.
 - **Household payroll**: wages and taxes for a household employee, W-2,
   Schedule H and SSA EFW2 export with a local validator.
-- **MCP server** (optional): about 50 read and write tools over stateless streamable
+- **MCP server** (optional): about 70 read and write tools over stateless streamable
   HTTP with bearer-token auth, for Claude and other MCP clients.
   [docs](docs/mcp-server.md)
 - **AI extras** (optional, off by default): weekly, monthly and portfolio

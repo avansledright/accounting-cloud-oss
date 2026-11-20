@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- MCP server: 27 more tools, so an AI client can finish what it starts
+  instead of sending you to the web app. Full edits for debts
+  (`update_debt`: minimum payment, rate, deferment, payment match), accounts,
+  assets (`update_asset_details`) and recurring items; deletes for debts,
+  assets, accounts, one-time transfers and dividends; `skip_projected` /
+  `unskip_projected`; `link_transaction_to_loan` and `loan_payments`;
+  payment plans; `recategorize_cc_transaction`; `update_goal` and
+  `contribute_to_goal`; `reset_month_budget_targets`;
+  `take_net_worth_snapshot`; `list_reports` / `get_report`.
+  `cc_transactions` rows now start with their ID, and `update_asset` can set
+  the loan's interest rate. See [docs/mcp-server.md](docs/mcp-server.md).
+- `loans.py`: the loan balance math in one module, used by the web app, the
+  MCP server and the advisor.
+
+### Fixed
+- The MCP and advisor tools (`debts`, `total_debt`, `list_debts`,
+  `list_assets`, `current_net_worth`) reported a loan's starting balance as
+  the amount owed. They now report what is owed today, the same figure as
+  the Debts and Net Worth pages.
+
 ## [0.4.0] - 2026-10-21
 
 ### Added

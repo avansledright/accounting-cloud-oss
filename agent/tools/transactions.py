@@ -168,7 +168,7 @@ def search_cc_transactions(
         amount = t.get('amount', 0)
         total += amount
         lines.append(
-            f"{d}  ${amount:,.2f}  {t.get('description', 'N/A')}  "
+            f"{t['_id']} | {d}  ${amount:,.2f}  {t.get('description', 'N/A')}  "
             f"[{t.get('card_name', '?')}, {t.get('category', 'Other')}]"
         )
 

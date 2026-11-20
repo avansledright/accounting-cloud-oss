@@ -286,6 +286,7 @@ models.py                 Data classes and shared constants (categories, account
 benefits.py               Contribution limits and card perk calculations (pure)
 home_move.py              Home move planner calculations (pure)
 recurrence.py             Recurring-item schedule and monthly-equivalent math (pure)
+loans.py                  Loan balance math: what is owed after the linked payments (no Flask)
 payroll_forms.py          IRS PDF filling and EFW2 file generation
 payroll_validator.py      Local EFW2 validation (pure)
 mcp_server.py             Standalone MCP server (read, write and report tools)

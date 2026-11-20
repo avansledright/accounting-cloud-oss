@@ -9,6 +9,7 @@ from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
 
+import loans
 from agent.db import db
 from models import ACCOUNT_TYPES, EXTRA_DEBT_PAYMENT_DESC, Transaction, Transfer
 
@@ -99,21 +100,26 @@ def list_recurring(item_type: str = "") -> str:
 
 def list_assets() -> str:
     out = []
+    pay = loans.payments_by_link(db, 'asset_liability_id')
     for a in db.assets.find():
-        out.append(
-            f"{a['_id']} | {a['name']} ({a.get('asset_type','?')}): "
-            f"value=${a.get('estimated_value',0):,.2f}, "
-            f"liability=${a.get('liability_balance') or 0:,.2f}"
-        )
+        line = (f"{a['_id']} | {a['name']} ({a.get('asset_type','?')}): "
+                f"value=${a.get('estimated_value',0):,.2f}")
+        start = a.get('liability_balance') or 0
+        if start > 0:
+            line += (f", loan owed now=${loans.current_asset_liability(a, pay):,.2f} "
+                     f"(starting ${start:,.2f}, {a.get('interest_rate') or 0}%)")
+        out.append(line)
     return "\n".join(out) if out else "No assets."
 
 
 def list_debts() -> str:
     out = []
+    pay = loans.payments_by_link(db, 'debt_id')
     for d in db.debts.find():
         out.append(
             f"{d['_id']} | {d['name']} ({d.get('debt_type','?')}): "
-            f"${d.get('balance',0):,.2f} @ {d.get('interest_rate',0)}% "
+            f"owed now ${loans.current_debt_balance(d, pay):,.2f} "
+            f"(starting ${d.get('balance',0):,.2f}) @ {d.get('interest_rate',0)}% "
             f"min ${d.get('minimum_payment',0)}"
         )
     return "\n".join(out) if out else "No debts."
@@ -477,8 +483,17 @@ def add_asset(name: str, asset_type: str, estimated_value: float,
 
 def update_asset(asset_id: str, estimated_value: float = 0,
                  liability_balance: float = 0,
-                 monthly_payment: float = 0) -> str:
-    """Update common asset fields. 0 means leave unchanged."""
+                 monthly_payment: float = 0,
+                 interest_rate: float = 0) -> str:
+    """Update common asset fields. 0 means leave unchanged.
+
+    interest_rate is the loan's APR in percent (5.19 for 5.19%). The current
+    balance is amortized at this rate, so a wrong rate drifts the balance owed.
+
+    liability_balance is the loan's STARTING balance (the web app's edit-asset
+    field): linked ledger payments are amortized against it to give what is
+    owed now. Setting it to today's payoff double-counts every linked payment.
+    """
     oid = _oid(asset_id)
     if not oid:
         return "Error: invalid asset_id."
@@ -486,6 +501,10 @@ def update_asset(asset_id: str, estimated_value: float = 0,
     if estimated_value: update['estimated_value'] = float(estimated_value)
     if liability_balance: update['liability_balance'] = float(liability_balance)
     if monthly_payment: update['monthly_payment'] = float(monthly_payment)
+    if interest_rate:
+        if not 0 < interest_rate < 100:
+            return "Error: interest_rate is a percent, e.g. 5.19."
+        update['interest_rate'] = float(interest_rate)
     if not update:
         return "Nothing to update."
     res = db.assets.update_one({'_id': oid}, {'$set': update})
