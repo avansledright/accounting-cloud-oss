@@ -40,6 +40,7 @@ from agent.tools.debts import get_debts, get_total_debt
 
 # ----- Write tools -----
 from agent.tools import writes as W
+from agent.tools import manage as M
 
 # ----- Async report generation -----
 from agent import reports as advisor_reports
@@ -58,7 +59,10 @@ mcp = FastMCP(
         "portfolio, net worth, and debts. Write tools create and update transactions, recurring "
         "items, transfers, accounts, assets, debts, budgets, goals, and "
         "holdings. Use the list_* tools first to discover IDs before calling "
-        "update_* or delete_* tools. All dates are YYYY-MM-DD."
+        "update_* or delete_* tools. All dates are YYYY-MM-DD. In update_* "
+        "tools, leave an argument out to keep the field as it is: text \"none\" "
+        "clears a field, and a number argument that defaults to -1 accepts 0 "
+        "as a real value."
     ),
     host=MCP_HOST,
     port=MCP_PORT,
@@ -69,6 +73,13 @@ mcp = FastMCP(
     streamable_http_path="/http",
     stateless_http=True,
 )
+
+
+def _combine(*results: str) -> str:
+    """One update tool can span two writers. Report what each did; "Nothing to
+    update." only when neither had anything to do."""
+    said = [r for r in results if r and r != "Nothing to update."]
+    return " ".join(dict.fromkeys(said)) if said else "Nothing to update."
 
 
 # ============================================================
@@ -260,10 +271,17 @@ def add_recurring(description: str, amount: float, frequency: str,
 def update_recurring(recurring_id: str, description: str = "",
                      amount: float = 0, frequency: str = "",
                      category: str = "", day_of_month: str = "",
-                     account_id: str = "") -> str:
-    """Update a recurring item."""
-    return W.update_recurring(recurring_id, description, amount, frequency,
-                              category, day_of_month, account_id)
+                     account_id: str = "", start_date: str = "",
+                     end_date: str = "", transaction_type: str = "",
+                     auto_pay: str = "", payment_method: str = "",
+                     notes: str = "", account_number: str = "") -> str:
+    """Update a recurring item (a bill or a paycheck). Pass only what changes.
+    end_date "none" makes it open-ended again; auto_pay is "true" or "false"."""
+    return _combine(
+        W.update_recurring(recurring_id, description, amount, frequency,
+                           category, day_of_month, account_id),
+        M.update_recurring_details(recurring_id, start_date, end_date, transaction_type,
+                                   auto_pay, payment_method, notes, account_number))
 
 @mcp.tool()
 def delete_recurring(recurring_id: str) -> str:
@@ -274,6 +292,23 @@ def delete_recurring(recurring_id: str) -> str:
 def override_recurring_amount(recurring_id: str, date: str, amount: float) -> str:
     """Override the projected amount for one specific occurrence."""
     return W.override_recurring_amount(recurring_id, date, amount)
+
+@mcp.tool()
+def skip_projected(description: str, date: str) -> str:
+    """Skip ONE projected occurrence of a recurring item or transfer, so the
+    outlook stops counting it. description exactly as the ledger shows it
+    (a transfer reads "Transfer to: <name>"); date is that occurrence's date."""
+    return M.skip_projected(description, date)
+
+@mcp.tool()
+def unskip_projected(description: str, date: str) -> str:
+    """Undo skip_projected."""
+    return M.unskip_projected(description, date)
+
+@mcp.tool()
+def list_skipped(date_from: str = "") -> str:
+    """Skipped occurrences on or after date_from (default today)."""
+    return M.list_skipped(date_from)
 
 
 # ============================================================
@@ -303,6 +338,27 @@ def delete_recurring_transfer(transfer_id: str) -> str:
     """Delete a recurring transfer."""
     return W.delete_recurring_transfer(transfer_id)
 
+@mcp.tool()
+def list_transfers(limit: int = 20) -> str:
+    """One-time transfers WITH IDs, newest first. Recurring ones: list_recurring."""
+    return M.list_transfers(limit)
+
+@mcp.tool()
+def delete_transfer(transfer_id: str) -> str:
+    """Delete a one-time transfer and the two ledger rows it posted."""
+    return M.delete_transfer(transfer_id)
+
+@mcp.tool()
+def update_recurring_transfer(transfer_id: str, amount: float = -1,
+                              frequency: str = "", start_date: str = "",
+                              end_date: str = "", day_of_month: str = "",
+                              from_account_id: str = "", to_account_id: str = "",
+                              description: str = "", notes: str = "") -> str:
+    """Edit a recurring transfer. Pass only what changes; end_date "none" clears it."""
+    return M.update_recurring_transfer(transfer_id, amount, frequency, start_date,
+                                       end_date, day_of_month, from_account_id,
+                                       to_account_id, description, notes)
+
 
 # ============================================================
 # WRITE TOOLS — ACCOUNTS
@@ -325,10 +381,22 @@ def update_account_balance(account_id: str, balance: float) -> str:
 @mcp.tool()
 def update_account(account_id: str, name: str = "", institution: str = "",
                    estimated_return_rate: float = 0,
-                   is_primary: bool = False) -> str:
-    """Update account metadata."""
-    return W.update_account(account_id, name, institution,
-                            estimated_return_rate, is_primary)
+                   is_primary: bool = False, account_type: str = "",
+                   notes: str = "", account_number: str = "",
+                   management_type: str = "", balance_as_of_date: str = "") -> str:
+    """Update an account's details (not its balance: update_account_balance).
+    is_primary=true makes it the primary account and demotes the other."""
+    return _combine(
+        W.update_account(account_id, name, institution, estimated_return_rate, is_primary),
+        M.update_account_details(account_id, account_type, notes, account_number,
+                                 management_type, balance_as_of_date))
+
+@mcp.tool()
+def delete_account(account_id: str, force: bool = False) -> str:
+    """Delete an account. Refuses, and says what still uses it, while ledger
+    transactions, recurring items, transfers or holdings point at it; force=true
+    deletes anyway and leaves those rows without an account."""
+    return M.delete_account(account_id, force)
 
 
 # ============================================================
@@ -347,10 +415,41 @@ def add_asset(name: str, asset_type: str, estimated_value: float,
 @mcp.tool()
 def update_asset(asset_id: str, estimated_value: float = 0,
                  liability_balance: float = 0,
-                 monthly_payment: float = 0) -> str:
-    """Update common asset fields. 0 = leave unchanged."""
+                 monthly_payment: float = 0,
+                 interest_rate: float = 0) -> str:
+    """Update common asset fields. 0 = leave unchanged.
+    interest_rate is the loan's APR in percent (5.19 = 5.19%).
+    liability_balance is the loan's STARTING balance (the web app's field):
+    linked payments are subtracted from it to give what is owed now
+    (list_assets shows both). Don't set it to a statement's current payoff:
+    that subtracts every linked payment a second time."""
     return W.update_asset(asset_id, estimated_value, liability_balance,
-                          monthly_payment)
+                          monthly_payment, interest_rate)
+
+@mcp.tool()
+def update_asset_details(asset_id: str, name: str = "", asset_type: str = "",
+                         address: str = "", notes: str = "", payment_match: str = "",
+                         loan_term_months: int = -1, payment_start_date: str = "",
+                         payment_frequency: str = "", purchase_price: float = -1,
+                         purchase_date: str = "", property_tax_annual: float = -1,
+                         homeowners_insurance_annual: float = -1,
+                         pmi_monthly: float = -1, hoa_monthly: float = -1,
+                         escrow_balance: float = -1) -> str:
+    """The rest of an asset's fields (update_asset has value, loan balance,
+    payment and rate). The tax, insurance, PMI and HOA amounts are the
+    escrow taken out of each loan payment before principal, so they change what
+    the loan shows as owed. payment_match: ledger descriptions, comma separated,
+    that auto-link as payments on this loan. payment_frequency: monthly|biweekly."""
+    return M.update_asset_details(asset_id, name, asset_type, address, notes,
+                                  payment_match, loan_term_months, payment_start_date,
+                                  payment_frequency, purchase_price, purchase_date,
+                                  property_tax_annual, homeowners_insurance_annual,
+                                  pmi_monthly, hoa_monthly, escrow_balance)
+
+@mcp.tool()
+def delete_asset(asset_id: str) -> str:
+    """Delete an asset and its loan. Linked ledger payments stay, unlinked."""
+    return M.delete_asset(asset_id)
 
 @mcp.tool()
 def add_debt(name: str, debt_type: str, balance: float,
@@ -368,6 +467,25 @@ def update_debt_balance(debt_id: str, balance: float) -> str:
     return W.update_debt_balance(debt_id, balance)
 
 @mcp.tool()
+def update_debt(debt_id: str, name: str = "", debt_type: str = "",
+                interest_rate: float = -1, minimum_payment: float = -1,
+                creditor: str = "", account_number: str = "", notes: str = "",
+                deferment_end_date: str = "", subsidized: str = "",
+                payment_match: str = "") -> str:
+    """Edit a debt's details: minimum payment, rate (APR percent), name, type,
+    creditor, notes, deferment end date, subsidized ("true"/"false") and
+    payment_match (ledger descriptions, comma separated, that auto-link as
+    payments). Pass only what changes. The starting balance is update_debt_balance."""
+    return M.update_debt(debt_id, name, debt_type, interest_rate, minimum_payment,
+                         creditor, account_number, notes, deferment_end_date,
+                         subsidized, payment_match)
+
+@mcp.tool()
+def delete_debt(debt_id: str) -> str:
+    """Delete a debt. Its linked ledger payments stay on the ledger, unlinked."""
+    return M.delete_debt(debt_id)
+
+@mcp.tool()
 def make_debt_payment(debt_id: str, amount: float, date: str = "",
                       account_id: str = "", description: str = "") -> str:
     """Log a payment toward a debt as a ledger expense linked to it (like the
@@ -375,6 +493,59 @@ def make_debt_payment(debt_id: str, amount: float, date: str = "",
     for the primary account. description defaults to 'Extra Debt Payment';
     pass the loan's budget-line description for a regular scheduled payment."""
     return W.make_debt_payment(debt_id, amount, date, account_id, description)
+
+@mcp.tool()
+def link_transaction_to_loan(transaction_id: str, loan_ref: str = "") -> str:
+    """Count an existing ledger transaction as a payment on a loan. loan_ref is
+    'debt:<id>' (list_debts) or 'asset:<id>' (list_assets); empty unlinks it.
+    Linked payments are what lower a loan's balance."""
+    return M.link_transaction_to_loan(transaction_id, loan_ref)
+
+@mcp.tool()
+def loan_payments(loan_ref: str, limit: int = 12) -> str:
+    """A loan's linked payments, newest first, each split into principal,
+    interest and escrow with the balance after it. loan_ref: 'debt:<id>' or
+    'asset:<id>'."""
+    return M.loan_payments(loan_ref, limit)
+
+@mcp.tool()
+def list_payment_plans() -> str:
+    """No-interest installment plans (e.g. a medical bill paid monthly on a
+    card) WITH IDs and what is left on each."""
+    return M.list_payment_plans()
+
+@mcp.tool()
+def add_payment_plan(vendor: str, original_amount: float, monthly_payment: float,
+                     start_date: str = "", card_name: str = "", category: str = "",
+                     notes: str = "") -> str:
+    """Add a no-interest installment plan."""
+    return M.add_payment_plan(vendor, original_amount, monthly_payment, start_date,
+                              card_name, category, notes)
+
+@mcp.tool()
+def update_payment_plan(plan_id: str, vendor: str = "", original_amount: float = -1,
+                        monthly_payment: float = -1, start_date: str = "",
+                        card_name: str = "", category: str = "", notes: str = "",
+                        status: str = "") -> str:
+    """Edit a payment plan. status: active|closed."""
+    return M.update_payment_plan(plan_id, vendor, original_amount, monthly_payment,
+                                 start_date, card_name, category, notes, status)
+
+@mcp.tool()
+def delete_payment_plan(plan_id: str) -> str:
+    """Delete a payment plan. Card charges linked to it stay, unlinked."""
+    return M.delete_payment_plan(plan_id)
+
+@mcp.tool()
+def link_cc_transaction_to_plan(cc_transaction_id: str, plan_id: str = "") -> str:
+    """Count a credit card charge (ID from cc_transactions) as a payment on a
+    payment plan; empty plan_id unlinks it."""
+    return M.link_cc_transaction_to_plan(cc_transaction_id, plan_id)
+
+@mcp.tool()
+def recategorize_cc_transaction(cc_transaction_id: str, category: str) -> str:
+    """Change a credit card charge's category (ID from cc_transactions)."""
+    return M.recategorize_cc_transaction(cc_transaction_id, category)
 
 
 # ============================================================
@@ -398,6 +569,28 @@ def add_goal(name: str, target_amount: float, current_amount: float = 0,
 def update_goal_amount(goal_id: str, current_amount: float) -> str:
     """Update a goal's current amount."""
     return W.update_goal_amount(goal_id, current_amount)
+
+@mcp.tool()
+def update_goal(goal_id: str, name: str = "", target_amount: float = -1,
+                target_date: str = "", category: str = "", notes: str = "") -> str:
+    """Edit a goal's name, target amount, target date, category or notes."""
+    return M.update_goal(goal_id, name, target_amount, target_date, category, notes)
+
+@mcp.tool()
+def contribute_to_goal(goal_id: str, amount: float) -> str:
+    """Add to a goal's saved amount (negative takes money back out)."""
+    return M.contribute_to_goal(goal_id, amount)
+
+@mcp.tool()
+def reset_month_budget_targets(month: str) -> str:
+    """Drop every per-month budget override for YYYY-MM, so the month goes back
+    to the default targets."""
+    return M.reset_month_budget_targets(month)
+
+@mcp.tool()
+def take_net_worth_snapshot() -> str:
+    """Record today's net worth in the history (the Net Worth page's button)."""
+    return M.take_net_worth_snapshot()
 
 @mcp.tool()
 def delete_goal(goal_id: str) -> str:
@@ -432,6 +625,16 @@ def add_dividend(symbol: str, amount: float, date: str,
     """Manually record a dividend payment."""
     return W.add_dividend(symbol, amount, date, holding_id)
 
+@mcp.tool()
+def list_dividends(symbol: str = "", limit: int = 20) -> str:
+    """Recorded dividends WITH IDs, newest first."""
+    return M.list_dividends(symbol, limit)
+
+@mcp.tool()
+def delete_dividend(dividend_id: str) -> str:
+    """Delete a recorded dividend."""
+    return M.delete_dividend(dividend_id)
+
 
 # ============================================================
 # ADVISOR REPORTS
@@ -456,6 +659,17 @@ def generate_monthly_advisor_report() -> str:
     r = advisor_reports.generate_monthly_report()
     n = len((r or {}).get('insights') or '')
     return f"Monthly report generated. Insights: {n} chars."
+
+
+@mcp.tool()
+def list_reports(limit: int = 10) -> str:
+    """Saved advisor reports WITH IDs, newest first."""
+    return M.list_reports(limit)
+
+@mcp.tool()
+def get_report(report_id: str) -> str:
+    """The text of one saved report."""
+    return M.get_report(report_id)
 
 
 class BearerAuthASGI:

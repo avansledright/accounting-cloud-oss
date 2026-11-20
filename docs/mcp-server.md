@@ -202,10 +202,11 @@ are `YYYY-MM-DD`. Monetary amounts are plain numbers.
 The server's instructions tell clients to call the `list_*` tools first to
 discover IDs before calling `update_*` or `delete_*` tools. Rows from
 `list_accounts`, `list_recurring`, `list_holdings`, `list_debts`,
-`list_assets`, `list_goals` and `transactions` start with the MongoDB
-`ObjectId` followed by `|`.
+`list_assets`, `list_goals`, `list_transfers`, `list_dividends`,
+`list_payment_plans`, `list_reports`, `transactions` and `cc_transactions`
+start with the MongoDB `ObjectId` followed by `|`.
 
-There are 51 tools: 23 read, 26 write and 2 report tools.
+There are 78 tools: reads, writes that cover what the web forms do, and the report tools.
 
 ### Read tools
 
@@ -218,7 +219,7 @@ use) plus the ID-listing helpers in `agent/tools/writes.py`.
 | `account_summary` | none | Totals grouped as cash (checking and savings), investment (`INVESTMENT_ACCOUNT_TYPES`) and other. | `accounts.get_account_summary` |
 | `list_accounts` | none | Every account **with its ID**. Call this first when you need an `account_id`. | `writes.list_accounts` |
 | `transactions` | `description=""`, `date_from=""`, `date_to=""`, `transaction_type=""` (`expense`/`income`), `limit=20`, `account_id=""` | Search ledger transactions, newest first. Each row shows ID, date, signed amount, description and account. Covers every account unless `account_id` is given; transactions with no `account_id` count as the primary account's. Ends with a net total. | `transactions.search_transactions` |
-| `cc_transactions` | `description=""`, `card=""`, `date_from=""`, `date_to=""`, `category=""`, `limit=20` | Search imported credit card transactions, newest first. `card` matches card name or issuer; `category` is an exact, case-insensitive match. Charges are positive, credits negative. Rows do not include IDs. | `transactions.search_cc_transactions` |
+| `cc_transactions` | `description=""`, `card=""`, `date_from=""`, `date_to=""`, `category=""`, `limit=20` | Search imported credit card transactions, newest first. `card` matches card name or issuer; `category` is an exact, case-insensitive match. Charges are positive, credits negative. Each row starts with its ID, for `recategorize_cc_transaction` and `link_cc_transaction_to_plan`. | `transactions.search_cc_transactions` |
 | `spending_by_category` | `month=""` (`YYYY-MM`, default current) | Credit card spending per category for one month. | `transactions.get_spending_by_category` |
 | `budget_status` | `month=""` (`YYYY-MM`, default current) | Budget targets (default `budget_targets` overlaid with `monthly_budget_targets`) against actual credit card spending per category, with `OK`/`OVER`. | `budget.get_budget_status` |
 | `recurring_items` | `item_type=""` (`expense`/`income`/`transfer`) | Recurring transactions (excluding archived paid-off loan lines) and recurring transfers, with a monthly equivalent from `recurrence.calc_monthly_amount()`, the same figure the web budget page uses. No IDs. | `budget.get_recurring_items` |
@@ -232,23 +233,22 @@ use) plus the ID-listing helpers in `agent/tools/writes.py`.
 | `ytd_dividends` | none | Year-to-date dividend totals per symbol. | `portfolio.get_ytd_dividends` |
 | `current_net_worth` | none | Accounts, assets, asset loans and debts, with totals and net worth. | `networth.get_current_net_worth` |
 | `net_worth_history` | `limit=12` | Recent `networth_snapshots`, oldest first, with the change over the period. | `networth.get_net_worth_history` |
-| `debts` | none | Every debt with type, balance, APR, minimum payment, and deferment end date (marked subsidised where set). | `debts.get_debts` |
-| `list_debts` | none | Debts **with IDs**. | `writes.list_debts` |
-| `total_debt` | none | Sum of all debt balances, with a per-debt list. | `debts.get_total_debt` |
-| `list_assets` | none | Assets **with IDs**, value and liability balance. | `writes.list_assets` |
+| `debts` | none | Every debt with type, what is owed today, APR, minimum payment, and deferment end date (marked subsidised where set). | `debts.get_debts` |
+| `list_debts` | none | Debts **with IDs**: what is owed today and the starting balance. | `writes.list_debts` |
+| `total_debt` | none | Total owed today across debts, with a per-debt list. | `debts.get_total_debt` |
+| `list_assets` | none | Assets **with IDs**, value, and for a loan what is owed today, the starting balance and the rate. | `writes.list_assets` |
 | `list_goals` | none | Goals **with IDs**, current and target amounts. | `writes.list_goals` |
 
 Notes on how the read tools differ from the web pages:
 
-- **Debt and loan balances are the stored values.** In the web app, a debt's
-  `balance` (and an asset's `liability_balance`) is the *starting* balance;
-  the current balance is computed by walking linked ledger payments
-  (`_decorate_debt`, `_decorate_asset_liability` in `app.py`). The MCP tools
-  `debts`, `total_debt`, `list_debts`, `list_assets` and `current_net_worth`
-  read the stored field directly, so they can differ from the Debts and Net
-  Worth pages once payments are linked. A payment logged with
-  `make_debt_payment` therefore lowers the balance on the Debts page but not
-  in these tools.
+- **Debt and loan balances are what is owed today.** A debt's `balance` (and
+  an asset's `liability_balance`) is the *starting* balance; the current
+  balance comes from walking the linked ledger payments. That math lives in
+  `loans.py`, which both `app.py` and the tools use, so `debts`, `total_debt`,
+  `list_debts`, `list_assets`, `current_net_worth` and `loan_payments` show
+  the same figures as the Debts and Net Worth pages. `list_debts` and
+  `list_assets` also show the starting balance, because that is the field
+  `update_debt_balance` and `update_asset` set.
 - **The cash flow tools use a simplified projection** (`_generate_outlook` in
   `agent/tools/cashflow.py`), not the ledger's `calculate_yearly_outlook()`.
   The schedule is the same: each recurring item and recurring transfer counts
@@ -277,8 +277,15 @@ Implemented in `agent/tools/writes.py`. Each returns a status string such as
 `Error: ...` message. Invalid IDs and bad dates are reported as errors rather
 than raised.
 
-For `update_*` tools, **an empty string or `0` means "leave unchanged"**, so
-these tools cannot set a field to zero or clear it.
+For `update_*` tools, leaving an argument out keeps the field as it is. The
+arguments come in two generations:
+
+- The original arguments (`amount=0`, `estimated_value=0` and so on) treat
+  `0` or an empty string as "leave unchanged", so they cannot set a field to
+  zero or clear it.
+- The arguments added later default to `-1` for numbers, so `0` is a real
+  value (a 0% rate, a $0 minimum payment); text `"none"` clears a field; and
+  yes/no fields take `"true"` or `"false"`.
 
 #### Transactions
 
@@ -341,6 +348,41 @@ these tools cannot set a field to zero or clear it.
 | `delete_holding` | `holding_id` | Deletes the holding. |
 | `add_dividend` | `symbol`, `amount`, `date`, `holding_id=""` | Inserts a dividend with `source: 'manual'`. |
 
+#### Edits, deletes and links
+
+Implemented in `agent/tools/manage.py`. These close the gap to the web forms.
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `update_recurring` | adds `start_date`, `end_date`, `transaction_type`, `auto_pay`, `payment_method`, `notes`, `account_number` | Every field of the budget edit form. `end_date="none"` makes the item open-ended again. |
+| `skip_projected` / `unskip_projected` | `description`, `date` | Skips (or restores) one projected occurrence, as the ledger's skip button does. A transfer is skipped on both accounts. |
+| `list_skipped` | `date_from=""` | Skipped occurrences on or after a date (default today). |
+| `list_transfers` | `limit=20` | One-time transfers **with IDs**. |
+| `delete_transfer` | `transfer_id` | Deletes the transfer and the two ledger rows it posted. |
+| `update_recurring_transfer` | `transfer_id`, `amount=-1`, `frequency`, `start_date`, `end_date`, `day_of_month`, `from_account_id`, `to_account_id`, `description`, `notes` | Edits a recurring transfer. Rejects the same account on both sides and a non-positive amount. |
+| `update_account` | adds `account_type`, `notes`, `account_number`, `management_type`, `balance_as_of_date` | Every field of the account edit form except the balance. |
+| `delete_account` | `account_id`, `force=false` | Deletes an account. Refuses, and says what still uses it, while ledger transactions, recurring items, transfers or holdings point at it, and refuses the primary account. `force=true` deletes anyway. The web form has no such check. |
+| `update_asset_details` | `asset_id`, `name`, `asset_type`, `address`, `notes`, `payment_match`, `loan_term_months=-1`, `payment_start_date`, `payment_frequency`, `purchase_price=-1`, `purchase_date`, `property_tax_annual=-1`, `homeowners_insurance_annual=-1`, `pmi_monthly=-1`, `hoa_monthly=-1`, `escrow_balance=-1` | The asset fields `update_asset` does not have. The escrow amounts are taken out of each loan payment before principal, so they change what the loan shows as owed. |
+| `delete_asset` | `asset_id` | Deletes the asset and its loan; linked ledger payments stay, unlinked. |
+| `update_debt` | `debt_id`, `name`, `debt_type`, `interest_rate=-1`, `minimum_payment=-1`, `creditor`, `account_number`, `notes`, `deferment_end_date`, `subsidized`, `payment_match` | Every field of the debt edit form except the starting balance. |
+| `delete_debt` | `debt_id` | Deletes the debt; linked ledger payments stay, unlinked. |
+| `link_transaction_to_loan` | `transaction_id`, `loan_ref=""` | Counts a ledger transaction as a payment on a loan. `loan_ref` is `debt:<id>` or `asset:<id>`; empty unlinks. |
+| `loan_payments` | `loan_ref`, `limit=12` | A loan's linked payments, newest first, each split into principal, interest and escrow with the balance after it. |
+| `list_payment_plans`, `add_payment_plan`, `update_payment_plan`, `delete_payment_plan` | see docstrings | No-interest installment plans billed to a card. Deleting a plan unlinks its charges. |
+| `link_cc_transaction_to_plan` | `cc_transaction_id`, `plan_id=""` | Counts a card charge toward a payment plan; empty unlinks. |
+| `recategorize_cc_transaction` | `cc_transaction_id`, `category` | Sets a card charge's category and clears the `categorized_by` review mark, as the page does. |
+| `update_goal` | `goal_id`, `name`, `target_amount=-1`, `target_date`, `category`, `notes` | Edits a goal. |
+| `contribute_to_goal` | `goal_id`, `amount` | Adds to the saved amount (negative takes money out), like the Contribute box. |
+| `reset_month_budget_targets` | `month` | Drops a month's overrides so it uses the default targets. |
+| `take_net_worth_snapshot` | none | Records today's net worth in the history. |
+| `list_dividends` / `delete_dividend` | `symbol=""`, `limit=20` / `dividend_id` | Dividends with IDs, and removing one. |
+| `list_reports` / `get_report` | `limit=10` / `report_id` | Saved advisor reports and the text of one. |
+
+Deliberately not exposed: payroll, CSV import and export, statement upload,
+the what-if simulation, the payoff planner and the benefits page. They produce
+tax paperwork or depend on page logic in `app.py`, which the MCP process does
+not load.
+
 ### Write tools and app side effects
 
 The write tools insert and update documents directly. They **do not** run the
@@ -363,8 +405,12 @@ and where it still differs.
 | `add_recurring_transfer` | `POST /transfers/recurring/add` | Mostly | MCP does not check that the accounts exist or differ, or that the amount is positive. |
 | `delete_recurring_transfer` | `POST /transfers/recurring/delete/<id>` | Yes | |
 | `add_account` / `update_account` / `update_account_balance` | `/accounts/add`, `/accounts/edit/<id>`, `/accounts/update-balance/<id>` | Yes | Primary demotion matches the web forms. |
-| `add_asset` / `update_asset` | `/assets/add`, `/assets/edit/<id>` | Partly | Only a subset of fields. |
-| `add_debt` | `POST /debts/add` | Partly | Only a subset of fields. |
+| `add_asset` / `update_asset` / `update_asset_details` | `/assets/add`, `/assets/edit/<id>` | Yes | Between them the two update tools cover the edit form. |
+| `delete_asset` / `delete_debt` | `/assets/delete/<id>`, `/debts/delete/<id>` | Yes | Both unlink the loan's ledger payments. |
+| `link_transaction_to_loan` | `POST /transactions/link-loan` | Mostly | The web route also archives or restores a paid-off loan's budget line at once; from MCP that happens on the next Debts or Goals page load. |
+| `delete_transfer` | `POST /transfers/delete/<id>` | Yes | Both remove the paired ledger rows. |
+| `delete_account` | `POST /accounts/delete/<id>` | Stricter | Refuses while the account is in use unless `force=true`. |
+| `add_debt` / `update_debt` | `POST /debts/add`, `/debts/edit/<id>` | Yes | `add_debt` sets a subset; `update_debt` reaches the rest. |
 | `update_debt_balance` | `/debts/edit/<id>` (Starting Balance) | Yes | Only the balance field. |
 | `make_debt_payment` | `POST /debts/plan/log-payment` | Yes | Both post a ledger expense linked to the loan (`debt_id`; the web route uses `asset_liability_id` when its target is an asset loan) with the `Extra Debt Payment` description and leave the starting balance alone. The web route always pays the payoff plan's current target, dated today, from the plan's cash account (else the primary account); MCP takes any `debt_id` and an optional date, account and description. |
 | `set_budget_target` | `/budget/targets`, `/budget/targets/template` | Yes | |

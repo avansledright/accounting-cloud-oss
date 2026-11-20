@@ -16,6 +16,7 @@ from dateutil.relativedelta import relativedelta
 import calendar
 import home_move
 import benefits
+import loans
 from recurrence import calc_monthly_amount, occurrence_dates
 from models import (Transaction, RecurringTransaction, Account, Asset, SavingsGoal, NetWorthSnapshot, ProjectedOverride, Transfer, Debt, RecurringTransfer,
                     Holding, Dividend, HouseholdEmployee, PayrollEntry, PaymentPlan,
@@ -4067,83 +4068,15 @@ def _decorate_payment_plan(plan):
 DEFAULT_PAYMENT_MATCHES = {}
 
 
-def _as_date(value):
-    """Coerce a stored date (datetime/date/ISO string) to a date for arithmetic."""
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value).date()
-        except ValueError:
-            return None
-    return None
-
-
-def _amortize(starting_balance, annual_rate, monthly_escrow, payments, frequency='monthly'):
-    """Walk linked payments in date order, splitting each into interest, escrow,
-    and principal. Interest accrues on elapsed days since the previous payment;
-    escrow is prorated the same way. Returns totals plus a per-payment breakdown."""
-    rate = (annual_rate or 0) / 100.0
-    escrow_m = monthly_escrow or 0
-    default_days = 14 if frequency == 'biweekly' else 30.44
-    remaining = starting_balance or 0
-    prev_date = None
-    total_principal = total_interest = total_escrow = 0.0
-    rows = []
-    for p in sorted(payments, key=lambda x: _as_date(x['date']) or date.min):
-        pdate = _as_date(p['date'])
-        if prev_date is not None and pdate is not None:
-            days = max(0.0, (pdate - prev_date).days)
-        else:
-            days = default_days
-        interest = remaining * rate * (days / 365.0) if rate else 0.0
-        escrow = escrow_m * (days / 30.44) if escrow_m else 0.0
-        principal = (p.get('amount') or 0) - interest - escrow
-        if principal < 0:
-            principal = 0.0
-        if principal > remaining:
-            principal = remaining
-        remaining -= principal
-        total_principal += principal
-        total_interest += interest
-        total_escrow += escrow
-        rows.append({
-            '_id': p.get('_id'),
-            'date': p['date'],
-            'description': p.get('description'),
-            'account_name': p.get('account_name'),
-            'amount': p.get('amount') or 0,
-            'interest': round(interest, 2),
-            'escrow': round(escrow, 2),
-            'principal': round(principal, 2),
-            'balance_after': round(remaining, 2),
-        })
-        prev_date = pdate
-    return {
-        'current_balance': max(0.0, round(remaining, 2)),
-        'principal_paid': round(total_principal, 2),
-        'interest_paid': round(total_interest, 2),
-        'escrow_paid': round(total_escrow, 2),
-        'rows': rows,
-    }
+# The loan math lives in loans.py so the MCP server and the advisor report the
+# same balances as these pages.
+_as_date = loans.as_date
+_amortize = loans.amortize
 
 
 def _payments_by_link(field):
     """Map of linked-loan id (str) -> list of payment dicts, for the given link field."""
-    out = {}
-    acct_names = {str(a['_id']): a['name'] for a in db.accounts.find()}
-    for t in db.transactions.find({field: {'$exists': True, '$ne': None}}):
-        key = str(t[field])
-        out.setdefault(key, []).append({
-            '_id': str(t['_id']),
-            'date': t.get('date'),
-            'amount': t.get('amount') or 0,
-            'description': t.get('description'),
-            'account_name': acct_names.get(str(t.get('account_id')), '—'),
-        })
-    return out
+    return loans.payments_by_link(db, field)
 
 
 PAID_OFF_EPSILON = 0.005  # balances at or below this (half a cent) count as paid off
@@ -5141,18 +5074,7 @@ def calculate_payoff():
 # ============ AMORTIZATION ============
 
 
-def _calculate_monthly_escrow(asset):
-    """Sum monthly escrow: property_tax/12 + insurance/12 + pmi + hoa."""
-    total = 0
-    if asset.get('property_tax_annual'):
-        total += asset['property_tax_annual'] / 12
-    if asset.get('homeowners_insurance_annual'):
-        total += asset['homeowners_insurance_annual'] / 12
-    if asset.get('pmi_monthly'):
-        total += asset['pmi_monthly']
-    if asset.get('hoa_monthly'):
-        total += asset['hoa_monthly']
-    return total
+_calculate_monthly_escrow = loans.monthly_escrow
 
 
 def _calculate_loan_payoff(balance, rate_apr, period_payment, frequency):

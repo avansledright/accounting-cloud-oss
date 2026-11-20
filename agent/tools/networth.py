@@ -1,3 +1,4 @@
+import loans
 from agent.db import db
 
 
@@ -8,13 +9,21 @@ def get_current_net_worth() -> str:
     account_total = sum(a.get('balance', 0) or 0 for a in accounts)
 
     # Assets
-    assets = list(db.assets.find({}, {'name': 1, 'asset_type': 1, 'estimated_value': 1, 'liability_balance': 1}))
+    # Loans: what is owed today (starting balance less linked payments), not
+    # the starting balance stored on the record.
+    assets = list(db.assets.find())
     asset_value = sum(a.get('estimated_value', 0) or 0 for a in assets)
-    asset_liabilities = sum(a.get('liability_balance', 0) or 0 for a in assets)
+    apay = loans.payments_by_link(db, 'asset_liability_id')
+    for a in assets:
+        a['owed'] = loans.current_asset_liability(a, apay)
+    asset_liabilities = sum(a['owed'] for a in assets)
 
     # Debts
-    debts = list(db.debts.find({}, {'name': 1, 'debt_type': 1, 'balance': 1}))
-    debt_total = sum(d.get('balance', 0) or 0 for d in debts)
+    debts = list(db.debts.find())
+    dpay = loans.payments_by_link(db, 'debt_id')
+    for d in debts:
+        d['owed'] = loans.current_debt_balance(d, dpay)
+    debt_total = sum(d['owed'] for d in debts)
 
     total_assets = account_total + asset_value
     total_liabilities = asset_liabilities + debt_total
@@ -34,12 +43,12 @@ def get_current_net_worth() -> str:
     lines.append(f"\nLiabilities:")
     if assets:
         for a in assets:
-            lb = a.get('liability_balance', 0) or 0
+            lb = a['owed']
             if lb > 0:
                 lines.append(f"  {a['name']} loan: ${lb:,.2f}")
     if debts:
         for d in debts:
-            lines.append(f"  {d['name']} ({d.get('debt_type', '')}): ${d.get('balance', 0):,.2f}")
+            lines.append(f"  {d['name']} ({d.get('debt_type', '')}): ${d['owed']:,.2f}")
     lines.append(f"  Total liabilities: ${total_liabilities:,.2f}")
 
     lines.append(f"\nNet worth: ${net_worth:,.2f}")
