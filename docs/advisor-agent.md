@@ -155,6 +155,12 @@ not start a scheduler.
 Each generation is wrapped in `try/except` and logged, so one failing report
 does not stop the others or kill the thread.
 
+`schedule_reports()` also starts two loops that do not depend on AI: the
+[scheduled-task](scheduled-tasks.md) loop and the
+[price-alert](price-alerts.md) loop. A scheduled task of type *Advisor
+report* is another way to have a report written on a schedule of your
+choosing; it is skipped while AI is off.
+
 ## Generating reports on demand
 
 ### From the Reports page

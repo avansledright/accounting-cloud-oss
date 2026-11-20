@@ -6,7 +6,8 @@ Desktop, or any MCP-capable client) as a set of tools. It has **read tools**
 (balances, transactions, budgets, cash flow, portfolio, net worth, debts),
 **write tools** (create, update and delete transactions, recurring items,
 transfers, accounts, assets, debts, budget targets, goals, holdings and
-dividends) and two **report tools** that trigger the
+dividends), tools that manage [scheduled tasks](scheduled-tasks.md) and
+[price alerts](price-alerts.md), and two **report tools** that trigger the
 [advisor reports](advisor-agent.md).
 
 It is a separate process from the Flask web app. It talks to the same MongoDB
@@ -206,7 +207,7 @@ discover IDs before calling `update_*` or `delete_*` tools. Rows from
 `list_payment_plans`, `list_reports`, `transactions` and `cc_transactions`
 start with the MongoDB `ObjectId` followed by `|`.
 
-There are 78 tools: reads, writes that cover what the web forms do, and the report tools.
+There are 88 tools: reads, writes that cover what the web forms do, scheduled tasks, price alerts, and the report tools.
 
 ### Read tools
 
@@ -433,8 +434,44 @@ server logs. There is no MCP tool for the portfolio report, and MCP-triggered
 runs do not show up in the web page's in-progress banner. The finished report
 appears on `/reports`. See [advisor-agent.md](advisor-agent.md).
 
+### Scheduled tasks
+
+Implemented in `agent/scheduled_tasks.py`. The web app's polling loop runs
+due tasks; this server creates, edits and deletes them, and can run one on
+request. Invalid input comes back as an `Error: ...` string. See
+[scheduled-tasks.md](scheduled-tasks.md).
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `list_scheduled_tasks` | none | Every task **with its ID**: type, enabled or disabled, schedule in words, next run, last run and status. |
+| `add_scheduled_task` | `name`, `task_type` (`rebalance_check`/`report`/`reminder`), `frequency` (`weekly`/`monthly`/`quarterly`/`yearly`/`once`), `month=0`, `day=0`, `weekday=-1` (0 = Monday), `hour=8`, `config_json="{}"`, `notes=""`, `date=""` | Creates an enabled task and returns its ID, schedule and next run. `config_json` is a JSON object: for `rebalance_check`, `{"accounts": [{"account_id": "...", "targets": {"SYMBOL": percent, ...}, "taxable": false, "scan_only": false}], "drift_threshold_pct": 5, "include_tax_loss_harvest": true, "ai_narrative": true}` (targets must sum to 100 within 0.5 unless `scan_only`; accounts must be investment accounts); for `report`, `{"report_type": "weekly"|"monthly"|"portfolio"}`; for `reminder`, `{"message": "...", "checklist": ["...", ...]}`. `once` takes `date` (`YYYY-MM-DD`), or `month` + `day` for the next occurrence. Hours are in the server's time zone. For a `report` task while AI is off, the reply adds that it will be skipped until AI is turned on. |
+| `update_scheduled_task` | `task_id`, `name=""`, `task_type=""`, `frequency=""`, `month=0`, `day=0`, `weekday=-1`, `hour=-1`, `config_json=""`, `notes=""`, `enabled=""` (`"true"`/`"false"`), `date=""` | Changes only what is passed. `config_json` is merged key by key into the stored config (a given `accounts` list replaces the old one). Changing the schedule or re-enabling re-computes the next run from now. Changing `task_type` needs a matching `config_json`. |
+| `delete_scheduled_task` | `task_id` | Deletes the task. Its past results stay in `reports`. |
+| `run_scheduled_task` | `task_id` | Runs the task now without changing its next run. `rebalance_check` and `reminder` run inside the request and return the Markdown summary. A `report` task starts in the background (reports can take minutes); while AI is off it returns `Skipped: ...` instead and nothing is called. |
+| `latest_scheduled_task_result` | `task_id` | The most recent stored result: Markdown summary, plus the AI commentary if there is one. |
+
+`run_scheduled_task` runs a rebalance check or reminder in the MCP process
+rather than the web app's; the result is stored the same way and shows on
+the web page.
+
+### Price alerts
+
+Implemented in `agent/price_alerts.py`. The web app checks the alerts and
+records the firings; this server only manages them. See
+[price-alerts.md](price-alerts.md).
+
+| Tool | Arguments | What it does |
+|---|---|---|
+| `list_price_alerts` | none | Every alert **with its ID**: triggers (and which have fired), last price, cost per share and gain against it, then the five latest firings and whether each was sent to Slack, refused, or only recorded because Slack is not configured. |
+| `add_price_alert` | `symbol`, `ladder_pct=""` (comma list, e.g. `"10,25,50"`), `target_price=0`, `daily_jump_pct=0`, `basis_price=0`, `notes=""` | Creates an alert. At least one trigger is required. With `basis_price` 0 the cost per share comes from the holdings; if there is none, the reply warns that the gain ladder cannot fire yet. The reply also says when Slack is not configured. |
+| `delete_price_alert` | `alert_id` | Deletes the alert. Its past firings stay in `price_alert_events`. |
+| `reset_price_alert` | `alert_id` | Re-arms every trigger and re-enables the alert. |
+
+There is no MCP tool for "Check now"; alerts are checked by the web app.
+
 ## Related docs
 
+- [scheduled-tasks.md](scheduled-tasks.md) and [price-alerts.md](price-alerts.md): the features behind those tools
 - [architecture.md](architecture.md): how the processes and collections fit together
 - [advisor-agent.md](advisor-agent.md): the report generator behind the report tools
 - [deployment.md](deployment.md): running the MCP server in Docker or Kubernetes

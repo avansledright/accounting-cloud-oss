@@ -20,6 +20,7 @@ SEEDED = [
     'accounts', 'transactions', 'recurring_transactions', 'recurring_transfers',
     'debts', 'assets', 'holdings', 'savings_goals', 'budget_targets',
     'cc_cards', 'cc_transactions',
+    'scheduled_tasks', 'price_alerts', 'price_alert_events',
 ]
 
 
@@ -125,6 +126,33 @@ def load_demo_data(db, force=False):
         (roth, 'BND', 50, 3700.00),
     ):
         db.holdings.insert_one(Holding(str(acct._id), sym, qty, cost_basis=cost, notes='demo').__dict__)
+
+    # ---- Scheduled tasks and a price alert (no AI needed) -----------------
+    # Both tasks are yearly, so the next run is simply next January.
+    task_base = {'enabled': True, 'notes': 'demo', 'last_run': None, 'last_status': None,
+                 'last_error': None, 'last_report_id': None, 'running_since': None,
+                 'created_at': now, 'updated_at': now}
+    db.scheduled_tasks.insert_one(dict(
+        task_base, name='Yearly rebalance check', task_type='rebalance_check',
+        schedule={'frequency': 'yearly', 'month': 1, 'day': 15, 'hour': 8},
+        next_run=datetime(now.year + 1, 1, 15, 8),
+        config={'accounts': [
+            {'account_id': str(roth._id), 'targets': {'VXUS': 60.0, 'BND': 40.0},
+             'taxable': False, 'scan_only': False},
+            {'account_id': str(brokerage._id), 'targets': {}, 'taxable': True, 'scan_only': True},
+        ], 'drift_threshold_pct': 5.0, 'include_tax_loss_harvest': True, 'ai_narrative': True}))
+    db.scheduled_tasks.insert_one(dict(
+        task_base, name='Review insurance and beneficiaries', task_type='reminder',
+        schedule={'frequency': 'yearly', 'month': 1, 'day': 10, 'hour': 9},
+        next_run=datetime(now.year + 1, 1, 10, 9),
+        config={'message': 'Once a year, check that these still match your life.',
+                'checklist': ['Beneficiaries on retirement accounts', 'Home and car insurance cover',
+                              'Emergency fund target']}))
+    db.price_alerts.insert_one({
+        'symbol': 'VTI', 'ladder_pct': [10.0, 25.0, 50.0], 'target_price': None,
+        'daily_jump_pct': None, 'basis_price': None, 'notes': 'demo', 'enabled': True,
+        'ladder_fired': [], 'target_fired': False, 'daily_fired_on': None,
+        'last_price': None, 'last_checked': None, 'created_at': now})
 
     # ---- Goals and budget targets ----------------------------------------
     db.savings_goals.insert_one(SavingsGoal('Emergency fund (6 months)', 0, goal_type='emergency',

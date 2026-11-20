@@ -45,6 +45,11 @@ from agent.tools import manage as M
 # ----- Async report generation -----
 from agent import reports as advisor_reports
 
+# ----- Scheduled tasks and price alerts. The web app's polling loops run
+# them; this server only manages them (and can run one task on request). -----
+from agent import scheduled_tasks
+from agent import price_alerts
+
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.environ.get("MCP_PORT", "8765"))
 # Public mount path when behind an ingress that strips a prefix (e.g.
@@ -58,7 +63,8 @@ mcp = FastMCP(
         "accounts, ledger and credit card transactions, budgets, cash flow, "
         "portfolio, net worth, and debts. Write tools create and update transactions, recurring "
         "items, transfers, accounts, assets, debts, budgets, goals, and "
-        "holdings. Use the list_* tools first to discover IDs before calling "
+        "holdings, and manage scheduled tasks (rebalance checks, reminders, "
+        "advisor reports that run on a schedule) and price alerts. Use the list_* tools first to discover IDs before calling "
         "update_* or delete_* tools. All dates are YYYY-MM-DD. In update_* "
         "tools, leave an argument out to keep the field as it is: text \"none\" "
         "clears a field, and a number argument that defaults to -1 accepts 0 "
@@ -670,6 +676,108 @@ def list_reports(limit: int = 10) -> str:
 def get_report(report_id: str) -> str:
     """The text of one saved report."""
     return M.get_report(report_id)
+
+
+# ============================================================
+# SCHEDULED TASKS
+# ============================================================
+
+@mcp.tool()
+def list_scheduled_tasks() -> str:
+    """List scheduled tasks WITH IDs: type, schedule, enabled, next/last run and status."""
+    return scheduled_tasks.list_tasks_text()
+
+@mcp.tool()
+def add_scheduled_task(name: str, task_type: str, frequency: str,
+                       month: int = 0, day: int = 0, weekday: int = -1,
+                       hour: int = 8, config_json: str = "{}", notes: str = "",
+                       date: str = "") -> str:
+    """Create a scheduled task that runs inside the web app.
+
+    task_type: 'rebalance_check' | 'report' | 'reminder'.
+    frequency: 'weekly' (weekday 0=Mon..6) | 'monthly' (day) | 'quarterly'
+    (month = first quarter month, day) | 'yearly' (month, day) | 'once' (date
+    YYYY-MM-DD, or month+day for the next occurrence). hour: 0-23 in the
+    server's time zone. Days past a month's end (31st) run on its last day.
+
+    config_json by type:
+      rebalance_check: {"accounts": [{"account_id": "...", "targets": {"VTI": 60,
+        "BND": 40}, "taxable": false}], "drift_threshold_pct": 5,
+        "include_tax_loss_harvest": true, "ai_narrative": true}
+        Targets must sum to 100 (within 0.5). Add "scan_only": true (targets may be
+        {}) for an account that should only be scanned for tax-loss harvesting
+        and wash-sale conflicts. Use list_accounts for investment account IDs.
+        Needs no AI; the optional narrative is added only when AI is on.
+      report: {"report_type": "weekly"|"monthly"|"portfolio"}
+        Needs AI turned on in the app (Admin -> AI settings); skipped otherwise.
+      reminder: {"message": "...", "checklist": ["item", ...]}  (no AI)
+    """
+    return scheduled_tasks.mcp_add_task(name, task_type, frequency, month, day, weekday,
+                                        hour, config_json, notes, date)
+
+@mcp.tool()
+def update_scheduled_task(task_id: str, name: str = "", task_type: str = "",
+                          frequency: str = "", month: int = 0, day: int = 0,
+                          weekday: int = -1, hour: int = -1, config_json: str = "",
+                          notes: str = "", enabled: str = "", date: str = "") -> str:
+    """Update a scheduled task. Pass only what changes (0 / -1 / "" = unchanged).
+    config_json is merged key-by-key into the stored config (a given "accounts"
+    list replaces the old one). enabled: "true" | "false". Changing the schedule
+    or re-enabling re-computes the next run from now."""
+    return scheduled_tasks.mcp_update_task(task_id, name, task_type, frequency, month, day,
+                                           weekday, hour, config_json, notes, enabled, date)
+
+@mcp.tool()
+def delete_scheduled_task(task_id: str) -> str:
+    """Delete a scheduled task. Its past results are kept."""
+    return scheduled_tasks.mcp_delete_task(task_id)
+
+@mcp.tool()
+def run_scheduled_task(task_id: str) -> str:
+    """Run a scheduled task now (does not change its next run). rebalance_check and
+    reminder run synchronously and return the summary; report tasks start in the
+    background (fetch them later with latest_scheduled_task_result), or are
+    skipped with a message while AI is turned off."""
+    return scheduled_tasks.mcp_run_task(task_id)
+
+@mcp.tool()
+def latest_scheduled_task_result(task_id: str) -> str:
+    """The most recent stored result (markdown summary + AI narrative if any) of a task."""
+    return scheduled_tasks.mcp_latest_result(task_id)
+
+
+# ============================================================
+# PRICE ALERTS
+# ============================================================
+
+@mcp.tool()
+def list_price_alerts() -> str:
+    """Price alerts WITH IDs: triggers (and which already fired), last price, basis
+    per share and gain vs basis, plus the latest firings."""
+    return price_alerts.mcp_list()
+
+@mcp.tool()
+def add_price_alert(symbol: str, ladder_pct: str = "", target_price: float = 0.0,
+                    daily_jump_pct: float = 0.0, basis_price: float = 0.0,
+                    notes: str = "") -> str:
+    """Record an alert when a stock goes up. Set at least one trigger:
+    ladder_pct: comma list of % gains over cost basis, each alerting once (e.g. "10,25,50,100");
+    target_price: alert once when the price reaches it;
+    daily_jump_pct: alert once per trading day when up this % on the previous close.
+    basis_price: per-share basis; leave 0 to use the holdings' cost_basis / quantity.
+    Checked every 5 minutes in US market hours by the web app. Firings show on the
+    Portfolio page, and are also posted to Slack when the app has Slack configured."""
+    return price_alerts.mcp_add(symbol, ladder_pct, target_price, daily_jump_pct, basis_price, notes)
+
+@mcp.tool()
+def delete_price_alert(alert_id: str) -> str:
+    """Delete a price alert (IDs from list_price_alerts)."""
+    return price_alerts.mcp_delete(alert_id)
+
+@mcp.tool()
+def reset_price_alert(alert_id: str) -> str:
+    """Re-arm every trigger of a price alert so ladder steps and the target can alert again."""
+    return price_alerts.mcp_reset(alert_id)
 
 
 class BearerAuthASGI:

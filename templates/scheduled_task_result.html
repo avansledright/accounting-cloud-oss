@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .sr-layout { display: grid; grid-template-columns: 1fr 240px; gap: 1.5rem; align-items: start; }
+  @media (max-width: 900px) { .sr-layout { grid-template-columns: 1fr; } }
+  .sr-card { background: var(--surface, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.25rem; }
+  .sr-card h2 { margin: 0 0 0.25rem; font-size: 1.15rem; }
+  .sr-card h3 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+  .sr-meta { font-size: 0.82rem; color: var(--text-secondary, #6b7280); margin-bottom: 0.75rem; }
+  .sr-verdict { border-radius: 8px; padding: 0.7rem 1rem; font-weight: 600; margin-bottom: 1rem; }
+  .sr-verdict.act { background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; }
+  .sr-verdict.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+  .sr-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; margin: 0.25rem 0 0.5rem; }
+  .sr-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary, #6b7280); }
+  .sr-table td, .sr-table th { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border, #e5e7eb); }
+  .sr-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .sr-breach td { background: #fff7ed; }
+  .sr-buy { color: #047857; font-weight: 600; }
+  .sr-sell { color: #b91c1c; font-weight: 600; }
+  .sr-note { font-size: 0.82rem; color: var(--text-secondary, #6b7280); margin: 0.35rem 0; }
+  .sr-warn { font-size: 0.84rem; color: #92400e; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 0.45rem 0.7rem; margin: 0.35rem 0; }
+  .sr-tag { display: inline-block; font-size: 0.7rem; font-weight: 600; padding: 0.05rem 0.4rem; border-radius: 4px; background: #f3f4f6; color: #4b5563; text-transform: uppercase; }
+  .sr-insights { background: linear-gradient(135deg, #eff6ff, #f0f9ff); border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.9rem 1.1rem; line-height: 1.6; margin-bottom: 1rem; }
+  .sr-checklist { list-style: none; padding: 0; }
+  .sr-checklist li { padding: 0.3rem 0; }
+  .sr-history { list-style: none; padding: 0; margin: 0; font-size: 0.84rem; }
+  .sr-history li { padding: 0.35rem 0; border-bottom: 1px solid var(--border, #f1f5f9); }
+  .sr-history li.current { font-weight: 600; }
+  .sr-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+  .sr-actions form { margin: 0; }
+  .sr-btn { padding: 0.3rem 0.65rem; border-radius: 6px; font-size: 0.8rem; border: 1px solid var(--border, #d1d5db); background: #fff; cursor: pointer; text-decoration: none; color: inherit; }
+  .sr-btn.primary { background: var(--primary, #3b82f6); border-color: var(--primary, #3b82f6); color: #fff; }
+</style>
+
+<div class="breadcrumb" style="margin-bottom:0.75rem;font-size:0.85rem;">
+  <a href="{{ url_for('scheduled_tasks_page') }}">Scheduled Tasks</a> &rsaquo; {{ task.name if task else (result.task_name if result else 'Result') }}
+</div>
+
+<h1 style="margin-top:0;">{{ task.name if task else (result.task_name or 'Scheduled task result') }}</h1>
+
+{% if task %}
+<div class="sr-meta">
+  {{ task.type_label }} &middot; {{ task.schedule_text }}
+  {% if task.enabled and task.next_run %} &middot; next {{ task.next_run.strftime('%b %d, %Y %I:%M %p') }}{% elif not task.enabled %} &middot; disabled{% endif %}
+  {% if task.last_status == 'error' %}<div style="color:#991b1b;">Last run failed: {{ task.last_error }}</div>{% endif %}
+  {% if task.last_status == 'skipped' %}<div style="color:#92400e;">Last run skipped: {{ task.last_error }}</div>{% endif %}
+</div>
+<div class="sr-actions">
+  <form method="POST" action="{{ url_for('run_scheduled_task_now', task_id=task._id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="sr-btn primary"{% if task.running %} disabled{% endif %}>{{ 'Running…' if task.running else 'Run now' }}</button>
+  </form>
+  <a class="sr-btn" href="{{ url_for('scheduled_tasks_page', edit=task._id) }}#task-form">Edit</a>
+</div>
+{% elif result %}
+<p class="sr-meta">This task has since been deleted.</p>
+{% endif %}
+
+<div class="sr-layout">
+  <div>
+    {% if not result %}
+    <div class="sr-card"><p class="sr-meta" style="margin:0;">No results yet. Use “Run now” or wait for the next scheduled run.</p></div>
+    {% else %}
+    {% set d = result.data %}
+    <div class="sr-card">
+      <h2>Result</h2>
+      <div class="sr-meta">
+        {% if result.date %}Run {{ result.date.strftime('%b %d, %Y at %I:%M %p') }}{% endif %}
+        {% if result.trigger == 'manual' %} &middot; manual run{% endif %}
+      </div>
+
+      {% if result.insights_html %}
+      <div class="sr-insights">{{ result.insights_html|safe }}</div>
+      {% endif %}
+
+      {% if result.task_type == 'rebalance_check' and d.accounts is defined %}
+        {% if d.any_breach %}
+        <div class="sr-verdict act">Rebalance needed — at least one fund drifted more than ±{{ '%g'|format(d.drift_threshold_pct) }}% from target.</div>
+        {% else %}
+        <div class="sr-verdict ok">No trades needed — everything is within ±{{ '%g'|format(d.drift_threshold_pct) }}% of target.</div>
+        {% endif %}
+
+        {% for a in d.accounts %}
+        <h3>{{ a.account_name }}
+          <span class="sr-tag">{{ 'taxable' if a.taxable else 'tax-advantaged' }}</span>
+          {% if a.scan_only %}<span class="sr-tag">scan only</span>{% endif %}
+          <span class="sr-meta" style="font-weight:400;">${{ a.total_value|usd }}</span>
+        </h3>
+
+        {% if a.rows %}
+        <table class="sr-table">
+          <thead><tr><th>Fund</th><th class="num">Value</th><th class="num">Current</th><th class="num">Target</th><th class="num">Drift</th></tr></thead>
+          <tbody>
+            {% for r in a.rows %}
+            <tr class="{{ 'sr-breach' if r.breach else '' }}">
+              <td>{{ r.symbol }}{% if r.untargeted %} <span class="sr-tag">no target</span>{% endif %}{% if r.price_source == 'cost_basis' %} <span class="sr-tag">stale</span>{% endif %}</td>
+              <td class="num">${{ r.value|usd }}</td>
+              <td class="num">{{ '%.1f'|format(r.current_pct) }}%</td>
+              <td class="num">{{ '%.1f'|format(r.target_pct) }}%</td>
+              <td class="num">{{ '%+.1f'|format(r.drift_pct) }}%{% if r.breach %} ⚠{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+
+        {% if a.trades %}
+        <table class="sr-table">
+          <thead><tr><th>Suggested trade</th><th class="num">Amount</th><th class="num">≈ Shares</th>{% if a.taxable %}<th class="num">Est. gain</th>{% endif %}</tr></thead>
+          <tbody>
+            {% for t in a.trades %}
+            <tr>
+              <td><span class="sr-{{ t.action }}">{{ t.action|upper }}</span> {{ t.symbol }}</td>
+              <td class="num">${{ t.amount|usd }}</td>
+              <td class="num">{{ '%.2f'|format(t.shares) if t.shares else '—' }}</td>
+              {% if a.taxable %}<td class="num">{% if t.est_gain is defined %}{% if t.est_gain < 0 %}-{% endif %}${{ t.est_gain|abs|usd }}{% else %}—{% endif %}</td>{% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% elif a.rows and not a.breaches %}
+        <p class="sr-note">Within threshold — no trades needed.</p>
+        {% endif %}
+
+        {% if a.tlh_candidates %}
+        <table class="sr-table">
+          <thead><tr><th>Tax-loss harvest candidate</th><th class="num">Value</th><th class="num">Cost basis</th><th class="num">Unrealized loss</th><th>Also held in</th></tr></thead>
+          <tbody>
+            {% for c in a.tlh_candidates %}
+            <tr>
+              <td>{{ c.symbol }}</td>
+              <td class="num">${{ c.value|usd }}</td>
+              <td class="num">${{ c.cost_basis|usd }}</td>
+              <td class="num sr-sell">-${{ (0 - c.unrealized_loss)|usd }} ({{ '%.1f'|format(c.loss_pct) }}%)</td>
+              <td>{{ (c.also_held_in or [])|join(', ') or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% elif a.taxable and d.include_tax_loss_harvest and a.total_value %}
+        <p class="sr-note">No positions at an unrealized loss.</p>
+        {% endif %}
+
+        {% for n in a.notes %}<p class="sr-note">{{ n }}</p>{% endfor %}
+        {% for w in a.warnings %}<div class="sr-warn">⚠ {{ w }}</div>{% endfor %}
+        {% endfor %}
+
+        {% if d.any_tlh %}<p class="sr-note">{{ d.wash_sale_note }}</p>{% endif %}
+
+      {% elif result.task_type == 'reminder' and d.checklist is defined %}
+        {% if d.message %}<p>{{ d.message }}</p>{% endif %}
+        {% if d.checklist %}
+        <ul class="sr-checklist">
+          {% for item in d.checklist %}<li>☐ {{ item }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+
+      {% else %}
+        <div>{{ result.summary_html|safe }}</div>
+        {% if result.task_type == 'report' and d.report_id %}
+        <p><a href="{{ url_for('report_detail', report_id=d.report_id) }}">Open the report &rarr;</a></p>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <aside class="sr-card">
+    <h3 style="margin-top:0;">Past runs</h3>
+    {% if runs %}
+    <ul class="sr-history">
+      {% for r in runs %}
+      <li class="{{ 'current' if result and r._id == result._id else '' }}">
+        <a href="{{ url_for('scheduled_task_result', report_id=r._id) }}">{{ r.date.strftime('%b %d, %Y %I:%M %p') if r.date else '—' }}</a>
+        {% if r.trigger == 'manual' %}<span class="sr-tag">manual</span>{% endif %}
+        {% if r.data and r.data.any_breach %}<span class="sr-tag" style="background:#ffedd5;color:#9a3412;">action</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="sr-meta" style="margin:0;">No runs yet.</p>
+    {% endif %}
+  </aside>
+</div>
+{% endblock %}

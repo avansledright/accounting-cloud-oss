@@ -55,6 +55,10 @@ spec:
           valueFrom: {secretKeyRef: {name: accounting-secret, key: ALPHA_VANTAGE_KEY, optional: true}}
         - name: OLLAMA_API_KEY
           valueFrom: {secretKeyRef: {name: accounting-secret, key: OLLAMA_API_KEY, optional: true}}
+        # Optional: price alerts are also posted to Slack when this and
+        # SLACK_CHANNEL (configmap.yaml) are both set.
+        - name: SLACK_BOT_TOKEN
+          valueFrom: {secretKeyRef: {name: accounting-secret, key: SLACK_BOT_TOKEN, optional: true}}
         volumeMounts:
         - name: cc-statements
           mountPath: /app/data/cc_statements

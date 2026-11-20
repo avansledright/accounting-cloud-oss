@@ -54,18 +54,22 @@ Concurrency comes from gunicorn threads. If you scale to more workers or replica
 Importing `app.py` (which is what gunicorn does) starts these daemon threads:
 
 1. **Advisor report scheduler** — `agent_scheduler.schedule_reports()` is called right after `agent_db.init(db)` near the top of `app.py`. It returns immediately unless `ADVISOR_ENABLED=true`. When enabled, it first runs `_check_and_generate()` (generates any missing current-period weekly, monthly and portfolio reports), then sleeps until the earlier of next Monday 06:00 or the 1st of next month 06:00 and checks again. See [advisor-agent.md](advisor-agent.md).
+   The same call then starts two loops that do not depend on AI:
+   - **Scheduled tasks** — `agent.scheduled_tasks.start_task_loop()` polls every five minutes for due tasks in `scheduled_tasks`, claims each one atomically and runs it. See [scheduled-tasks.md](scheduled-tasks.md).
+   - **Price alerts** — `agent.price_alerts.start_alert_loop()` checks `price_alerts` every five minutes during US market hours. See [price-alerts.md](price-alerts.md).
 2. **Stock refresh** — `schedule_stock_refresh()` is called at the very bottom of `app.py`. The loop sleeps until the next 17:00 local time, resets `STOCK_CACHE['timestamp']`, and calls `get_live_data()` for every distinct symbol in `holdings`. See [portfolio.md](portfolio.md).
 
 Short-lived daemon threads are also spawned on demand:
 
 - `_run_report_async(report_type)` — from `POST /api/reports/generate`. One job per report type at a time; an error stays visible for 60 seconds.
+- `scheduled_tasks.run_task_async(task_id)` — from **Run now** on `/scheduled-tasks`; and one thread per rebalance check that asked for AI commentary, after its result is stored.
 - `_categorize_leftovers_async()` — after a credit-card upload and on every `/credit-cards` page load, when `CC_LLM_ENABLED` is true. See [credit-cards.md](credit-cards.md).
 
 ### Optional MCP server process
 
 `mcp_server.py` is a separate, standalone process (the `mcp` profile in `docker-compose.yml`, command `python mcp_server.py`). It does **not** import `app.py`. It opens its own `MongoClient` with the same `MONGO_URI` / `MONGO_DB_NAME`, calls `agent_db.init(db)`, and registers read tools from `agent/tools/*` and write tools from `agent/tools/writes.py`. Every request must carry `Authorization: Bearer <MCP_API_TOKEN>` (`BearerAuthASGI`); with no token configured it refuses everything. See [mcp-server.md](mcp-server.md).
 
-Because the MCP server does not import `app.py`, it does not start the stock refresh or report scheduler threads. Logic both processes need lives in modules with no Flask dependency: `recurrence.py` (when a recurring item occurs and its monthly equivalent), `loans.py` (what a loan owes after its linked payments) and `models.py` (document shapes, `Transaction` / `Transfer`, account types, `EXTRA_DEBT_PAYMENT_DESC`). The write tools build documents with the same models and defaults as the web routes. Some read tools are still simpler than the web pages: `agent/tools/cashflow.py` counts the same occurrence dates as `calculate_yearly_outlook()` but does not apply actuals, dedup, skips, overrides or the loan payoff simulation (see [mcp-server.md](mcp-server.md#read-tools)).
+Because the MCP server does not import `app.py`, it does not start the stock refresh, report scheduler, scheduled-task or price-alert threads (it manages tasks and alerts, and the web app runs them). Logic both processes need lives in modules with no Flask dependency: `recurrence.py` (when a recurring item occurs and its monthly equivalent), `loans.py` (what a loan owes after its linked payments) and `models.py` (document shapes, `Transaction` / `Transfer`, account types, `EXTRA_DEBT_PAYMENT_DESC`). The write tools build documents with the same models and defaults as the web routes. Some read tools are still simpler than the web pages: `agent/tools/cashflow.py` counts the same occurrence dates as `calculate_yearly_outlook()` but does not apply actuals, dedup, skips, overrides or the loan payoff simulation (see [mcp-server.md](mcp-server.md#read-tools)).
 
 ### The `agent/` package
 
@@ -75,7 +79,9 @@ Shared by both processes:
 |---|---|---|
 | `agent/db.py` | both | `_DBProxy` so modules can `from agent.db import db` before the real database exists; `init(app_db)` binds it |
 | `agent/reports.py` | both | `generate_weekly_report()`, `generate_monthly_report()`, `generate_portfolio_report()`; calls an Ollama-compatible endpoint (`AGENT_OLLAMA_*`) and upserts into `reports` |
-| `agent/scheduler.py` | web | `schedule_reports()` background loop |
+| `agent/scheduler.py` | web | `schedule_reports()` background loop; also starts the two loops below |
+| `agent/scheduled_tasks.py` | both | Scheduled tasks: schedule math, task types, atomic claim and runner, validation, MCP helpers. The loop runs in the web process only |
+| `agent/price_alerts.py` | both | Price alerts: pure `evaluate()`, atomic claim, optional Slack delivery, MCP helpers. The loop runs in the web process only |
 | `agent/prompts.py` | reports | Prompt templates; optional household profile from `ADVISOR_PROFILE_FILE` |
 | `agent/tools/*.py` | MCP server, reports | Read tools (accounts, transactions, budget, cashflow, portfolio, networth, debts) and write tools (`writes.py`) |
 
@@ -181,6 +187,8 @@ There are also per-collection CSV exports and imports (`/export/csv/transactions
 | Home move | `/tools/home-move`, `/tools/home-move/save`, `/tools/home-move/delete/<id>` | [home-move.md](home-move.md) |
 | Payroll | `/payroll`, `/payroll/settings`, `/payroll/employees/...`, `/payroll/run`, `/payroll/preview`, `/payroll/entries/<id>/delete`, `/payroll/w2/...`, `/payroll/schedule-h/...`, `/payroll/validate/<year>`, `/payroll/efw2/<year>`, `/payroll/year-end/<year>/zip`, `/payroll/forms/...` | [features.md](features.md) |
 | Advisor reports | `/reports`, `/reports/<id>`, `POST /api/reports/generate`, `/api/reports/status` | [advisor-agent.md](advisor-agent.md) |
+| Scheduled tasks | `/scheduled-tasks`, `/scheduled-tasks/save`, `/scheduled-tasks/<id>`, `/scheduled-tasks/<id>/toggle`, `/scheduled-tasks/<id>/run`, `/scheduled-tasks/<id>/delete`, `/scheduled-tasks/results/<report_id>` | [scheduled-tasks.md](scheduled-tasks.md) |
+| Price alerts | `/portfolio/alerts/add`, `/portfolio/alerts/<id>/reset`, `/portfolio/alerts/<id>/delete`, `/portfolio/alerts/check` | [price-alerts.md](price-alerts.md) |
 | Admin and backup | `/admin`, `/export`, `/import`, `/export/csv/*`, `/import/csv/*`, `/health` | this document |
 
 ## Data model
@@ -222,7 +230,9 @@ There are also per-collection CSV exports and imports (`/export/csv/transactions
 | [`benefit_settings`](#benefit_settings) | Singleton tax-year benefit settings |
 | [`benefit_accounts`](#benefit_accounts) | Per-account contribution-limit configuration |
 | [`contribution_overrides`](#contribution_overrides) | Paystub year-to-date contribution figures |
-| [`reports`](#reports) | Advisor reports |
+| [`reports`](#reports) | Advisor reports and scheduled-task results |
+| `scheduled_tasks` | Scheduled tasks ([scheduled-tasks.md](scheduled-tasks.md#the-scheduled_tasks-collection)) |
+| `price_alerts`, `price_alert_events` | Price alerts and their firings ([price-alerts.md](price-alerts.md#collections)) |
 | [`home_move_scenarios`](#home_move_scenarios) | Saved home-move planner scenarios |
 | [`household_employees`](#household_employees) | Household employees (payroll) |
 | [`payroll_entries`](#payroll_entries) | Payroll runs |
@@ -591,6 +601,8 @@ Written by `agent/reports.py` with `replace_one(..., upsert=True)` keyed on `(ty
 | `date` | datetime | Generation time |
 | `data` | dict | The figures gathered for the report |
 | `insights` | str | Markdown text from the LLM, rendered to HTML on `/reports` |
+
+Scheduled-task results are stored here too, with `type: 'scheduled'`, inserted (not upserted) by `agent/scheduled_tasks.py`. They add `task_id`, `task_name`, `task_type`, `trigger`, `summary_md` and `status`; `period` is the run day (`YYYY-MM-DD`), `data` has a different shape per task type, and `insights` is usually `null`. Anything that lists this collection must allow for that type. See [scheduled-tasks.md](scheduled-tasks.md#results).
 
 ### home_move_scenarios
 

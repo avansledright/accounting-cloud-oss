@@ -195,6 +195,93 @@
     </div>
     {% endif %}
 
+    <!-- Price Alerts (agent/price_alerts.py) -->
+    <div class="table-container" id="price-alerts">
+        <h2>Price Alerts</h2>
+        <p class="muted-text">Get told when a stock goes up. Checked every 5 minutes during US market hours. Each ladder step and the target fire once; the daily jump at most once a trading day.
+        {% if price_alert_slack %}Alerts are listed here and posted to Slack.{% else %}Alerts are listed here. Posting them to Slack is optional (set <code>SLACK_BOT_TOKEN</code> and <code>SLACK_CHANNEL</code>).{% endif %}</p>
+        {% if price_alert_error %}
+        <p class="negative">{{ price_alert_error }}</p>
+        {% endif %}
+        {% if price_alerts %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Triggers</th>
+                    <th>Last Price</th>
+                    <th>Basis / Share</th>
+                    <th>vs Basis</th>
+                    <th>Checked</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for a in price_alerts %}
+                <tr>
+                    <td><strong>{{ a.symbol }}</strong></td>
+                    <td>{{ a.summary }}</td>
+                    <td>{{ ('$%.4f'|format(a.last_price)).rstrip('0').rstrip('.') if a.last_price else '—' }}</td>
+                    <td>{% if a.basis %}${{ ('%.4f'|format(a.basis)).rstrip('0').rstrip('.') }} <span class="muted-text">({{ a.basis_source }})</span>{% else %}<span class="badge badge-warn">no cost basis</span>{% endif %}</td>
+                    <td>{% if a.gain_pct is not none %}<span class="{{ 'positive' if a.gain_pct >= 0 else 'negative' }}">{{ '%+.1f'|format(a.gain_pct) }}%</span>{% else %}&mdash;{% endif %}</td>
+                    <td>{{ a.last_checked.strftime('%b %d %H:%M') if a.last_checked else 'not yet' }}</td>
+                    <td class="actions-cell">
+                        <form method="POST" action="{{ url_for('reset_price_alert', alert_id=a._id) }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="inline-edit-save" title="Re-arm every trigger">&#8635;</button>
+                        </form>
+                        <form method="POST" action="{{ url_for('delete_price_alert', alert_id=a._id) }}" style="display:inline;" onsubmit="return confirm('Delete this price alert?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="delete-btn" title="Delete">&#10005;</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <form method="POST" action="{{ url_for('check_price_alerts') }}" style="margin-top: 0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="submit-btn">Check now</button>
+        </form>
+        {% endif %}
+
+        <form method="POST" action="{{ url_for('add_price_alert') }}" class="holding-form" style="margin-top: 1rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="alert_symbol">Symbol:</label>
+                    <input type="text" id="alert_symbol" name="symbol" placeholder="e.g., AAPL" required style="text-transform: uppercase;">
+                </div>
+                <div class="form-group">
+                    <label for="alert_ladder">Gain ladder (% over basis):</label>
+                    <input type="text" id="alert_ladder" name="ladder_pct" value="10, 25, 50, 100">
+                </div>
+                <div class="form-group">
+                    <label for="alert_target">Target price ($):</label>
+                    <input type="number" id="alert_target" name="target_price" step="0.0001" min="0" placeholder="optional">
+                </div>
+                <div class="form-group">
+                    <label for="alert_daily">Daily jump (%):</label>
+                    <input type="number" id="alert_daily" name="daily_jump_pct" step="0.1" min="0" placeholder="optional">
+                </div>
+                <div class="form-group">
+                    <label for="alert_basis">Basis / share ($):</label>
+                    <input type="number" id="alert_basis" name="basis_price" step="0.0001" min="0" placeholder="from holdings">
+                </div>
+            </div>
+            <button type="submit" class="submit-btn">Add Price Alert</button>
+        </form>
+
+        {% if price_alert_events %}
+        <h3>Recent alerts</h3>
+        <ul>
+            {% for e in price_alert_events %}
+            <li>{% if e.at %}{{ e.at.strftime('%b %d %H:%M') }} &middot; {% endif %}<strong>{{ e.symbol }}</strong> {{ e.kind }}{% if e.price %} at ${{ ('%.4f'|format(e.price)).rstrip('0').rstrip('.') }}{% endif %}{% if e.delivered %} <span class="muted-text">(sent to Slack)</span>{% elif e.error %} <span class="badge badge-warn">not sent to Slack: {{ e.error }}</span>{% endif %}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+    </div>
+
     <!-- Dividend Calendar -->
     {% if annual_dividends > 0 %}
     <div class="table-container">

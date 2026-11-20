@@ -7,6 +7,28 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Scheduled tasks** (`/scheduled-tasks`): chores the app runs for you
+  weekly, monthly, quarterly, yearly or once, with every result saved. Three
+  kinds: a **rebalance check** (drift against your target weights, the trades
+  back to target, tax-loss-harvest candidates and wash-sale warnings), a
+  **reminder** with a checklist, and an **advisor report** on your own
+  schedule. Rebalance checks and reminders need no AI; an advisor-report task
+  is skipped with a clear message while AI is off. See
+  [docs/scheduled-tasks.md](docs/scheduled-tasks.md).
+- **Price alerts** on the Portfolio page: a gain ladder over your cost per
+  share (each step fires once), a target price, and a daily jump. Checked
+  every five minutes in US market hours and listed on the page. Posting them
+  to Slack is optional (`SLACK_BOT_TOKEN` and `SLACK_CHANNEL`); with neither
+  set, nothing is sent. See [docs/price-alerts.md](docs/price-alerts.md).
+- MCP server: 10 more tools (88 in all) for the two features above:
+  `list_scheduled_tasks`, `add_scheduled_task`, `update_scheduled_task`,
+  `delete_scheduled_task`, `run_scheduled_task`,
+  `latest_scheduled_task_result`, `list_price_alerts`, `add_price_alert`,
+  `delete_price_alert`, `reset_price_alert`.
+- Demo data: two scheduled tasks and a price alert.
+- New environment variables, all optional: `SLACK_BOT_TOKEN`,
+  `SLACK_CHANNEL`, `PRICE_ALERT_POLL_SECONDS`,
+  `SCHEDULED_TASKS_POLL_SECONDS`.
 - MCP server: 27 more tools, so an AI client can finish what it starts
   instead of sending you to the web app. Full edits for debts
   (`update_debt`: minimum payment, rate, deferment, payment match), accounts,
@@ -20,6 +42,12 @@ All notable changes to this project are documented here. The format follows
   the loan's interest rate. See [docs/mcp-server.md](docs/mcp-server.md).
 - `loans.py`: the loan balance math in one module, used by the web app, the
   MCP server and the advisor.
+
+### Changed
+- The Advisor page lists scheduled-task results next to the reports, and
+  the dashboard's "Latest Advisor Brief" card ignores them.
+- `scripts/seed_demo.py --force` also clears `scheduled_tasks`,
+  `price_alerts` and `price_alert_events`.
 
 ### Fixed
 - The MCP and advisor tools (`debts`, `total_debt`, `list_debts`,

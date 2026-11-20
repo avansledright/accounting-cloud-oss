@@ -218,16 +218,35 @@ def reports_page():
     monthly = _render(monthly)
     portfolio = _render(portfolio)
 
-    history = list(db.reports.find(
-        {}, {'type': 1, 'period': 1, 'date': 1}
-    ).sort('date', -1).limit(40))
+    history = _report_history()
+    scheduled_results = list(db.reports.find(
+        {'type': 'scheduled'}, {'task_name': 1, 'task_type': 1, 'date': 1, 'data.any_breach': 1}
+    ).sort('date', -1).limit(5))
+    for r in scheduled_results:
+        r.setdefault('task_name', None)
+        r.setdefault('date', None)
+        r.setdefault('data', {})
 
     with _REPORT_JOBS_LOCK:
         jobs = {k: dict(v) for k, v in _REPORT_JOBS.items()}
 
     return render_template('reports.html', weekly=weekly, monthly=monthly,
                            portfolio=portfolio, history=history, jobs=jobs,
+                           scheduled_results=scheduled_results,
                            advisor_configured=ai.enabled('report'), ai_status=ai.status())
+
+
+def _report_history():
+    """Sidebar list for /reports. Includes scheduled-task results (type
+    'scheduled'), which have a task name instead of a meaningful period."""
+    history = list(db.reports.find(
+        {}, {'type': 1, 'period': 1, 'date': 1, 'task_name': 1}
+    ).sort('date', -1).limit(40))
+    for r in history:
+        r.setdefault('type', 'report')
+        r.setdefault('period', '')
+        r.setdefault('task_name', None)
+    return [r for r in history if isinstance(r.get('date'), datetime)]
 
 
 @app.route('/api/reports/status')
@@ -253,17 +272,17 @@ def report_detail(report_id):
     report = db.reports.find_one({'_id': rid})
     if not report:
         return redirect(url_for('reports_page'))
+    if report.get('type') == 'scheduled':
+        return redirect(url_for('scheduled_task_result', report_id=str(rid)))
     if report.get('insights'):
         report['insights_html'] = _md.markdown(
             report['insights'], extensions=['extra', 'sane_lists', 'nl2br']
         )
-    history = list(db.reports.find(
-        {}, {'type': 1, 'period': 1, 'date': 1}
-    ).sort('date', -1).limit(40))
+    history = _report_history()
     return render_template('reports.html',
-                           weekly=report if report['type']=='weekly' else None,
-                           monthly=report if report['type']=='monthly' else None,
-                           portfolio=report if report['type']=='portfolio' else None,
+                           weekly=report if report.get('type') == 'weekly' else None,
+                           monthly=report if report.get('type') == 'monthly' else None,
+                           portfolio=report if report.get('type') == 'portfolio' else None,
                            history=history, viewing_id=str(rid),
                            advisor_configured=ai.enabled('report'), ai_status=ai.status())
 
@@ -280,6 +299,168 @@ def generate_reports():
     if report_type in ('portfolio', 'all'):
         _run_report_async('portfolio')
     return redirect(url_for('reports_page'))
+
+
+# ============ SCHEDULED TASKS ============
+# Logic lives in agent/scheduled_tasks.py; these routes only parse/render.
+
+import agent.scheduled_tasks as sched_tasks
+from agent import price_alerts
+
+_SCHED_MESSAGES = {
+    'saved': 'Task saved.', 'deleted': 'Task deleted. Its past results are kept.',
+    'started': 'Running in the background — refresh in a moment for the result.',
+    'enabled': 'Task enabled.', 'disabled': 'Task disabled.',
+}
+
+
+def _sched_render_md(text):
+    import markdown as _md
+    return _md.markdown(text or '', extensions=['extra', 'sane_lists', 'nl2br'])
+
+
+def _sched_page(form_task=None, error=None, status=200):
+    tasks = [sched_tasks.task_defaults(t)
+             for t in db.scheduled_tasks.find().sort('name', 1)]
+    for t in tasks:
+        t['running'] = sched_tasks.is_running(t['_id']) or bool(t.get('running_since'))
+    investment_accounts = list(db.accounts.find(
+        {'account_type': {'$in': INVESTMENT_ACCOUNT_TYPES}}, {'name': 1, 'account_type': 1}
+    ).sort('name', 1))
+    for a in investment_accounts:
+        a['_id'] = str(a['_id'])
+    message = _SCHED_MESSAGES.get(request.args.get('msg', ''))
+    err = error or request.args.get('error')
+    editing = bool(form_task and form_task.get('_id'))
+    if form_task is None:
+        form_task = _sched_form_task({'schedule': {'frequency': 'yearly', 'hour': 8}})
+    return render_template('scheduled_tasks.html', tasks=tasks, form_task=form_task,
+                           editing=editing,
+                           error=err, message=message,
+                           investment_accounts=investment_accounts,
+                           task_types=sched_tasks.TASK_TYPES,
+                           report_types=sched_tasks.REPORT_TYPE_LABELS,
+                           frequencies=sched_tasks.FREQUENCIES,
+                           weekdays=sched_tasks.WEEKDAYS,
+                           month_names=calendar.month_abbr,
+                           ai_report_enabled=ai.enabled('report')), status
+
+
+def _sched_form_task(task):
+    """Shape a stored task (or posted fields) for the form's initial values."""
+    task = dict(task)
+    task.setdefault('_id', None)
+    task.setdefault('name', '')
+    task.setdefault('task_type', 'rebalance_check')
+    task.setdefault('notes', '')
+    task.setdefault('enabled', True)
+    sched = dict(task.get('schedule') or {})
+    when = sched.get('date')
+    sched['date'] = when.strftime('%Y-%m-%d') if isinstance(when, datetime) else (when or '')
+    for key in ('frequency', 'month', 'day', 'weekday', 'hour'):
+        sched.setdefault(key, None)
+    task['schedule'] = sched
+    cfg = dict(task.get('config') or {})
+    cfg.setdefault('accounts', [])
+    cfg.setdefault('drift_threshold_pct', 5)
+    cfg.setdefault('include_tax_loss_harvest', True)
+    cfg.setdefault('ai_narrative', True)
+    cfg.setdefault('report_type', 'weekly')
+    cfg.setdefault('message', '')
+    checklist = cfg.get('checklist') or []
+    cfg['checklist_text'] = checklist if isinstance(checklist, str) else '\n'.join(checklist)
+    task['config'] = cfg
+    task['_id'] = str(task['_id']) if task['_id'] else ''
+    return task
+
+
+@app.route('/scheduled-tasks')
+def scheduled_tasks_page():
+    form_task = None
+    edit_id = request.args.get('edit')
+    if edit_id:
+        task = sched_tasks.get_task(edit_id)
+        if task:
+            form_task = _sched_form_task(task)
+    return _sched_page(form_task=form_task)
+
+
+@app.route('/scheduled-tasks/save', methods=['POST'])
+def save_scheduled_task():
+    fields = sched_tasks.fields_from_form(request.form)
+    task_id = request.form.get('task_id', '').strip()
+    if task_id:
+        if not safe_objectid(task_id):
+            return redirect(url_for('scheduled_tasks_page', error='Invalid task id.'))
+        err = sched_tasks.update_task(task_id, fields)
+    else:
+        _, err = sched_tasks.create_task(fields)
+    if err:
+        posted = dict(fields, _id=task_id or None)
+        return _sched_page(form_task=_sched_form_task(posted), error=err, status=400)
+    return redirect(url_for('scheduled_tasks_page', msg='saved'))
+
+
+@app.route('/scheduled-tasks/<task_id>/toggle', methods=['POST'])
+def toggle_scheduled_task(task_id):
+    enable = request.form.get('enabled') == '1'
+    err = sched_tasks.set_enabled(task_id, enable)
+    if err:
+        return redirect(url_for('scheduled_tasks_page', error=err))
+    return redirect(url_for('scheduled_tasks_page', msg='enabled' if enable else 'disabled'))
+
+
+@app.route('/scheduled-tasks/<task_id>/run', methods=['POST'])
+def run_scheduled_task_now(task_id):
+    err = sched_tasks.run_task_async(task_id)
+    if err:
+        return redirect(url_for('scheduled_tasks_page', error=err))
+    return redirect(url_for('scheduled_tasks_page', msg='started'))
+
+
+@app.route('/scheduled-tasks/<task_id>/delete', methods=['POST'])
+def delete_scheduled_task(task_id):
+    err = sched_tasks.delete_task(task_id)
+    if err:
+        return redirect(url_for('scheduled_tasks_page', error=err))
+    return redirect(url_for('scheduled_tasks_page', msg='deleted'))
+
+
+def _sched_detail(task, result):
+    if result:
+        sched_tasks.result_defaults(result)
+        result['summary_html'] = _sched_render_md(result['summary_md'])
+        result['insights_html'] = _sched_render_md(result['insights']) if result['insights'] else None
+    runs = []
+    if task:
+        runs = list(db.reports.find({'type': 'scheduled', 'task_id': task['_id']},
+                                    {'date': 1, 'trigger': 1, 'data.any_breach': 1})
+                    .sort('date', -1).limit(30))
+    return render_template('scheduled_task_result.html', task=task, result=result, runs=runs,
+                           ai_report_enabled=ai.enabled('report'))
+
+
+@app.route('/scheduled-tasks/<task_id>')
+def scheduled_task_detail(task_id):
+    task = sched_tasks.get_task(task_id)
+    if not task:
+        return redirect(url_for('scheduled_tasks_page', error='Scheduled task not found.'))
+    sched_tasks.task_defaults(task)
+    task['running'] = sched_tasks.is_running(task['_id']) or bool(task.get('running_since'))
+    return _sched_detail(task, sched_tasks.latest_result(task['_id']))
+
+
+@app.route('/scheduled-tasks/results/<report_id>')
+def scheduled_task_result(report_id):
+    rid = safe_objectid(report_id)
+    result = db.reports.find_one({'_id': rid, 'type': 'scheduled'}) if rid else None
+    if not result:
+        return redirect(url_for('reports_page'))
+    task = db.scheduled_tasks.find_one({'_id': result.get('task_id')})
+    if task:
+        sched_tasks.task_defaults(task)
+        task['running'] = False
+    return _sched_detail(task, result)
 
 
 # ============ STOCK DATA SERVICE ============
@@ -1557,7 +1738,8 @@ def index():
     top_goals = goals[:3]
 
     # Latest advisor brief
-    latest_brief = db.reports.find_one({}, sort=[('date', -1)])
+    # Scheduled-task results (type 'scheduled') are not advisor briefs.
+    latest_brief = db.reports.find_one({'type': {'$ne': 'scheduled'}}, sort=[('date', -1)])
     if latest_brief:
         latest_brief['_id'] = str(latest_brief['_id'])
         if isinstance(latest_brief.get('date'), datetime):
@@ -3080,6 +3262,8 @@ def portfolio_page():
                 month_data['holdings'].append({'symbol': h['symbol'], 'amount': payment})
         dividend_calendar.append(month_data)
 
+    price_alerts_list, price_alert_events = price_alerts.list_for_page()
+
     return render_template('portfolio.html',
                            holdings=sorted(holdings, key=lambda x: x['value'], reverse=True),
                            investment_accounts=investment_accounts,
@@ -3091,7 +3275,40 @@ def portfolio_page():
                            monthly_dividends=annual_dividends / 12 if annual_dividends else 0,
                            dividend_calendar=dividend_calendar,
                            dividend_history=dividend_history,
-                           ytd_dividends=ytd_dividends)
+                           ytd_dividends=ytd_dividends,
+                           price_alerts=price_alerts_list,
+                           price_alert_events=price_alert_events,
+                           price_alert_error=request.args.get('alert_error'),
+                           price_alert_slack=price_alerts.slack_configured())
+
+
+# ---- price alerts (logic in agent/price_alerts.py) ----
+
+@app.route('/portfolio/alerts/add', methods=['POST'])
+def add_price_alert():
+    _, err = price_alerts.create_alert(request.form)
+    if err:
+        return redirect(url_for('portfolio_page', alert_error=err) + '#price-alerts')
+    return redirect(url_for('portfolio_page') + '#price-alerts')
+
+
+@app.route('/portfolio/alerts/<alert_id>/delete', methods=['POST'])
+def delete_price_alert(alert_id):
+    price_alerts.delete_alert(alert_id)
+    return redirect(url_for('portfolio_page') + '#price-alerts')
+
+
+@app.route('/portfolio/alerts/<alert_id>/reset', methods=['POST'])
+def reset_price_alert(alert_id):
+    price_alerts.reset_alert(alert_id)
+    return redirect(url_for('portfolio_page') + '#price-alerts')
+
+
+@app.route('/portfolio/alerts/check', methods=['POST'])
+def check_price_alerts():
+    """Check now, even outside market hours (prices may be the last close)."""
+    price_alerts.run_checks(force=True)
+    return redirect(url_for('portfolio_page') + '#price-alerts')
 
 
 @app.route('/portfolio/add', methods=['POST'])

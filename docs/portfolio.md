@@ -58,6 +58,12 @@ Routes:
 The portfolio page lists all self-managed investment accounts for assignment,
 plus managed ones in the filter (managed accounts simply have no holdings).
 
+The page also has a **Price Alerts** section (`/portfolio/alerts/*`), which
+uses the holdings' cost basis to tell you when a symbol has gained a set
+amount. It has its own page: [price-alerts.md](price-alerts.md). Checking a
+whole account against target weights is a
+[scheduled task](scheduled-tasks.md#rebalance-check).
+
 ## Live price data
 
 ### Sources

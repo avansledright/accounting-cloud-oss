@@ -60,9 +60,9 @@ shell first. `python app.py` serves on `0.0.0.0:5000` and turns on debug only
 when `FLASK_DEBUG=true`.
 
 `app.py` connects to MongoDB at import time and starts background threads
-(the stock price refresher and, if `ADVISOR_ENABLED=true`, the report
-scheduler), so the database must be reachable before the app starts serving
-requests.
+(the stock price refresher, the report scheduler, and the scheduled-task and
+price-alert loops), so the database must be reachable before the app starts
+serving requests.
 
 To work on the MCP server, run `python mcp_server.py` in another terminal with
 `MCP_API_TOKEN` exported (see [mcp-server.md](mcp-server.md)).
@@ -72,7 +72,8 @@ To work on the MCP server, run `python mcp_server.py` in another terminal with
 `scripts/seed_demo.py` fills an empty database with obviously fake data
 (accounts at invented institutions such as "Demo Bank", a fictional
 household, recurring items, recurring transfers, debts, assets, holdings, goals, budget targets,
-credit cards and card transactions) so every page has something to show:
+credit cards and card transactions, two scheduled tasks and a price alert) so every page has
+something to show:
 
 ```bash
 python scripts/seed_demo.py
@@ -89,7 +90,8 @@ what the setup wizard's **Load demo data instead** button calls.
 - **`--force`** first runs `delete_many({})` on every collection it seeds
   (`accounts`, `transactions`, `recurring_transactions`,
   `recurring_transfers`, `debts`, `assets`, `holdings`, `savings_goals`,
-  `budget_targets`, `cc_cards`, `cc_transactions`), then seeds. Other
+  `budget_targets`, `cc_cards`, `cc_transactions`, `scheduled_tasks`,
+  `price_alerts`, `price_alert_events`), then seeds. Other
   collections are left as they are. **Never point it at a database holding
   real data.**
 
@@ -121,6 +123,8 @@ the agent/MCP tools see the same database through `agent.db`) and `client`
 | `tests/test_mcp_writes.py` | MCP write tools against the web app's behaviour: primary-account default, delete skips, override date format, transfers with ledger rows, `biweekly`, debt starting balance and `make_debt_payment` (mongomock) |
 | `tests/test_payroll.py` | Pub 926 FICA/FUTA exemptions, the FICA threshold catch-up and Schedule H line-1 wages (mongomock) |
 | `tests/test_web_fixes.py` | Transfer delete, `/history?year=`, the account `?horizon=` fallback, calendar weekly items and end dates, home-move income excluding archived items (mongomock) |
+| `tests/test_scheduled_tasks.py` | `agent.scheduled_tasks`: schedule math (month-end and Feb 29 clamping, quarterly, once), the atomic claim and run-once catch-up, rebalance arithmetic with prices mocked, AI off (rebalance and reminder run, a report task is skipped with a message and nothing is called), the MCP tools and tool count, the pages, the demo tasks (mongomock) |
+| `tests/test_price_alerts.py` | `agent.price_alerts`: ladder, target and daily triggers firing once, the atomic claim, market hours in New York time, Slack optional (nothing sent or failing without a token; refusals recorded), validation, the Portfolio page and routes, old records (mongomock, quotes mocked) |
 | `tests/test_deploy_config.py` | The Dockerfile installs `tzdata` and sets an overridable `TZ`; the Kubernetes ConfigMap documents `TZ` |
 | `tests/conftest.py` | Puts the project root on `sys.path`; shared mongomock fixtures (`app_module`, `db`, `client`) |
 
@@ -237,6 +241,18 @@ primary input.
 database belong in a separate module (`benefits.py`, `home_move.py`,
 `recurrence.py`, `payroll_validator.py`, `payroll_forms.py`) so they can be tested and reused.
 
+### Claim before you run or send
+
+The scheduled-task and price-alert loops run in every web process. The
+supported setup is one process, but two can overlap (a second replica, or a
+restart). So a due task is taken with `scheduled_tasks.claim_task()` and an
+alert firing with `price_alerts._claim()` before anything runs or is sent:
+each is a single `find_one_and_update` that only one process can win. Do not
+add a code path that runs a due task or sends a firing without it.
+
+Results of scheduled tasks are stored in `reports` with `type: 'scheduled'`;
+code that lists `reports` must allow for that type.
+
 ### One process, in-memory state
 
 The stock price cache (`STOCK_CACHE`), report job state (`_REPORT_JOBS`) and
@@ -294,7 +310,9 @@ agent/
   db.py                   Database proxy shared by the agent code
   prompts.py              Household profile and prompt templates
   reports.py              Weekly, monthly and portfolio report generation
-  scheduler.py            Background report scheduler (ADVISOR_ENABLED)
+  scheduler.py            Background report scheduler (ADVISOR_ENABLED); starts the loops below
+  scheduled_tasks.py      Scheduled tasks: rebalance check, reminder, advisor report
+  price_alerts.py         Price alerts, with optional Slack delivery
   household_profile.example.md
   tools/                  Read tools (accounts, transactions, budget, cashflow,
                           portfolio, networth, debts) and writes.py
