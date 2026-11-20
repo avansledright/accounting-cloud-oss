@@ -85,6 +85,9 @@
             <a href="{{ url_for('reports_page') }}" class="sidebar-link{% if request.endpoint == 'reports_page' %} active{% endif %}">
                 <span class="sidebar-icon">&#129504;</span> Advisor
             </a>
+            <a href="{{ url_for('scheduled_tasks_page') }}" class="sidebar-link{% if request.endpoint in ['scheduled_tasks_page', 'scheduled_task_detail', 'scheduled_task_result'] %} active{% endif %}">
+                <span class="sidebar-icon">&#9200;</span> Scheduled Tasks
+            </a>
             <a href="{{ url_for('admin_page') }}" class="sidebar-link{% if request.endpoint == 'admin_page' %} active{% endif %}">
                 <span class="sidebar-icon">&#9881;</span> Admin
             </a>

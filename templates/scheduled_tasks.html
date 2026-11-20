@@ -1,0 +1,389 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+  .st-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+  .st-header h1 { margin: 0; }
+  .st-intro { color: var(--text-secondary, #6b7280); font-size: 0.9rem; margin: 0 0 1.25rem; max-width: 60rem; }
+  .st-banner { border-radius: 8px; padding: 0.7rem 1rem; margin-bottom: 1rem; font-size: 0.9rem; }
+  .st-banner.ok { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; }
+  .st-banner.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+  .st-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .st-table th { text-align: left; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary, #6b7280); }
+  .st-table td, .st-table th { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--border, #e5e7eb); vertical-align: top; }
+  .st-sub { font-size: 0.75rem; color: var(--text-secondary, #6b7280); }
+  .st-status { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; text-transform: uppercase; }
+  .st-status.ok { background: #d1fae5; color: #065f46; }
+  .st-status.error { background: #fee2e2; color: #991b1b; }
+  .st-status.running { background: #fef3c7; color: #92400e; }
+  .st-status.off { background: #f3f4f6; color: #6b7280; }
+  .st-status.skipped { background: #fef3c7; color: #92400e; }
+  .st-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: flex-start; }
+  .st-actions form { margin: 0; }
+  .st-btn { padding: 0.3rem 0.65rem; border-radius: 6px; font-size: 0.8rem; border: 1px solid var(--border, #d1d5db); background: #fff; cursor: pointer; text-decoration: none; color: inherit; display: inline-block; line-height: 1.4; }
+  .st-btn.primary { background: var(--primary, #3b82f6); border-color: var(--primary, #3b82f6); color: #fff; }
+  .st-btn.danger { background: #dc2626; border-color: #dc2626; color: #fff; }
+  .st-delete summary { list-style: none; }
+  .st-delete summary::-webkit-details-marker { display: none; }
+  .st-delete[open] summary { color: #6b7280; }
+  .st-delete .st-confirm { margin-top: 0.35rem; font-size: 0.78rem; }
+  .st-empty { text-align: center; padding: 2rem 1rem; color: var(--text-secondary, #6b7280); }
+
+  .st-form fieldset { border: 1px solid var(--border, #e5e7eb); border-radius: 10px; padding: 0.9rem 1rem 1rem; margin: 0 0 1rem; }
+  .st-form legend { font-weight: 600; font-size: 0.9rem; padding: 0 0.35rem; }
+  .st-form .form-row { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; }
+  .st-form .form-group { display: flex; flex-direction: column; min-width: 9rem; }
+  .st-form .form-group.wide { flex: 1 1 18rem; }
+  .st-form textarea { min-height: 4.5rem; font: inherit; padding: 0.45rem; border: 1px solid var(--border, #d1d5db); border-radius: 6px; }
+  .st-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.88rem; }
+  .st-check input { width: auto; }
+  .st-hint { font-size: 0.78rem; color: var(--text-secondary, #6b7280); margin: 0.25rem 0 0; }
+  .st-account { border: 1px dashed var(--border, #cbd5e1); border-radius: 8px; padding: 0.75rem; margin-bottom: 0.75rem; background: var(--surface-alt, #f9fafb); }
+  .st-account-head { display: flex; flex-wrap: wrap; gap: 0.75rem 1.25rem; align-items: flex-end; }
+  .st-targets { margin-top: 0.6rem; }
+  .st-target-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.35rem; }
+  .st-target-row input[name$="-symbol"] { width: 7rem; text-transform: uppercase; }
+  .st-target-row input[name$="-pct"] { width: 6rem; }
+  .st-sum { font-size: 0.8rem; font-weight: 600; }
+  .st-sum.bad { color: #b91c1c; }
+  .st-sum.good { color: #047857; }
+  .st-account.scan .st-targets { opacity: 0.45; }
+  .st-form-actions { display: flex; gap: 0.5rem; align-items: center; }
+</style>
+
+<div class="st-header">
+  <h1>Scheduled Tasks</h1>
+  <a class="st-btn primary" href="#task-form">+ New task</a>
+</div>
+<p class="st-intro">
+  Recurring financial chores that run inside the app on their own schedule — rebalance checks,
+  extra advisor reports and reminders. Every run is saved and listed on the
+  <a href="{{ url_for('reports_page') }}">Advisor</a> page too. Times are in the server's time zone; tasks are checked every 5 minutes.
+  Rebalance checks and reminders need no AI.
+</p>
+
+{% if message %}<div class="st-banner ok">{{ message }}</div>{% endif %}
+{% if error %}<div class="st-banner err">{{ error }}</div>{% endif %}
+
+<div class="data-entry">
+  {% if tasks %}
+  <table class="st-table">
+    <thead>
+      <tr><th>Task</th><th>Schedule</th><th>Next run</th><th>Last run</th><th>Actions</th></tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td>
+          <a href="{{ url_for('scheduled_task_detail', task_id=t._id) }}"><strong>{{ t.name }}</strong></a>
+          <div class="st-sub">{{ t.type_label }}{% if not t.enabled %} &middot; <span class="st-status off">disabled</span>{% endif %}{% if t.needs_ai and not ai_report_enabled %} &middot; <span class="st-status skipped">needs AI</span>{% endif %}</div>
+          {% if t.notes %}<div class="st-sub">{{ t.notes }}</div>{% endif %}
+        </td>
+        <td>{{ t.schedule_text }}</td>
+        <td>{% if t.enabled and t.next_run %}{{ t.next_run.strftime('%b %d, %Y %I:%M %p') }}{% else %}<span class="st-sub">—</span>{% endif %}</td>
+        <td>
+          {% if t.running %}<span class="st-status running">running</span>{% endif %}
+          {% if t.last_run %}
+            {{ t.last_run.strftime('%b %d, %Y') }}
+            {% if t.last_status %}<span class="st-status {{ t.last_status }}">{{ t.last_status }}</span>{% endif %}
+            {% if t.last_status == 'error' and t.last_error %}<div class="st-sub" style="color:#991b1b;">{{ t.last_error }}</div>{% endif %}
+            {% if t.last_status == 'skipped' and t.last_error %}<div class="st-sub" style="color:#92400e;">{{ t.last_error }}</div>{% endif %}
+            {% if t.last_report_id %}<div><a class="st-sub" href="{{ url_for('scheduled_task_result', report_id=t.last_report_id) }}">View result &rarr;</a></div>{% endif %}
+          {% else %}<span class="st-sub">never</span>{% endif %}
+        </td>
+        <td>
+          <div class="st-actions">
+            <form method="POST" action="{{ url_for('run_scheduled_task_now', task_id=t._id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="st-btn primary"{% if t.running %} disabled{% endif %}>Run now</button>
+            </form>
+            <form method="POST" action="{{ url_for('toggle_scheduled_task', task_id=t._id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="enabled" value="{{ '0' if t.enabled else '1' }}">
+              <button type="submit" class="st-btn">{{ 'Disable' if t.enabled else 'Enable' }}</button>
+            </form>
+            <a class="st-btn" href="{{ url_for('scheduled_tasks_page', edit=t._id) }}#task-form">Edit</a>
+            <details class="st-delete">
+              <summary class="st-btn">Delete</summary>
+              <form method="POST" action="{{ url_for('delete_scheduled_task', task_id=t._id) }}" class="st-confirm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>Delete “{{ t.name }}”? Past results stay.</div>
+                <button type="submit" class="st-btn danger">Confirm delete</button>
+              </form>
+            </details>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="st-empty">No scheduled tasks yet. Create one below, for example a yearly rebalance check or a quarterly reminder.</div>
+  {% endif %}
+</div>
+
+{% set ft = form_task %}
+{% set cfg = ft.config %}
+{% set sc = ft.schedule %}
+<div class="data-entry" id="task-form">
+  <h2>{{ 'Edit task' if editing else 'New task' }}</h2>
+  <form method="POST" action="{{ url_for('save_scheduled_task') }}" class="st-form" id="st-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="task_id" value="{{ ft._id or '' }}">
+
+    <fieldset>
+      <legend>Task</legend>
+      <div class="form-row">
+        <div class="form-group wide">
+          <label for="st-name">Name</label>
+          <input type="text" id="st-name" name="name" maxlength="120" required value="{{ ft.name or '' }}" placeholder="e.g. Yearly rebalance check">
+        </div>
+        <div class="form-group">
+          <label for="st-type">Type</label>
+          <select id="st-type" name="task_type">
+            {% for key, spec in task_types.items() %}
+            <option value="{{ key }}"{% if ft.task_type == key %} selected{% endif %}>{{ spec.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" style="justify-content:flex-end;">
+          <label class="st-check"><input type="checkbox" name="enabled" value="1"{% if ft.enabled %} checked{% endif %}> Enabled</label>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Schedule</legend>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="st-frequency">Repeats</label>
+          <select id="st-frequency" name="frequency">
+            {% for f in frequencies %}
+            <option value="{{ f }}"{% if sc.frequency == f %} selected{% endif %}>{{ 'One time' if f == 'once' else f|title }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" data-freq="quarterly yearly">
+          <label for="st-month">Month <span class="st-sub" data-freq="quarterly">(first quarter month)</span></label>
+          <select id="st-month" name="month">
+            {% for m in range(1, 13) %}
+            <option value="{{ m }}"{% if sc.month == m or (sc.month|string) == (m|string) %} selected{% endif %}>{{ month_names[m] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" data-freq="monthly quarterly yearly">
+          <label for="st-day">Day of month</label>
+          <input type="number" id="st-day" name="day" min="1" max="31" value="{{ sc.day or 15 }}">
+        </div>
+        <div class="form-group" data-freq="weekly">
+          <label for="st-weekday">Weekday</label>
+          <select id="st-weekday" name="weekday">
+            {% for d in weekdays %}
+            <option value="{{ loop.index0 }}"{% if (sc.weekday|string) == (loop.index0|string) %} selected{% endif %}>{{ d }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group" data-freq="once">
+          <label for="st-date">Date</label>
+          <input type="date" id="st-date" name="date" value="{{ sc.date or '' }}">
+        </div>
+        <div class="form-group">
+          <label for="st-hour">Time</label>
+          <select id="st-hour" name="hour">
+            {% for h in range(24) %}
+            <option value="{{ h }}"{% if (sc.hour|string) == (h|string) %} selected{% endif %}>{{ (h % 12) or 12 }}:00 {{ 'am' if h < 12 else 'pm' }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <p class="st-hint">Days past the end of a month (e.g. the 31st) run on that month's last day. If the app was down at run time, the task runs once on startup and then waits for its next date.</p>
+    </fieldset>
+
+    <fieldset data-type="rebalance_check">
+      <legend>Rebalance check</legend>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="st-threshold">Drift threshold (%)</label>
+          <input type="number" id="st-threshold" name="drift_threshold_pct" min="0.1" max="100" step="0.1" value="{{ cfg.drift_threshold_pct }}">
+        </div>
+        <div class="form-group" style="justify-content:flex-end;">
+          <label class="st-check"><input type="checkbox" name="include_tax_loss_harvest" value="1"{% if cfg.include_tax_loss_harvest %} checked{% endif %}> Scan taxable accounts for tax-loss harvesting</label>
+          <label class="st-check"><input type="checkbox" name="ai_narrative" value="1"{% if cfg.ai_narrative %} checked{% endif %}> Add a short AI summary{% if not ai_report_enabled %} (only when AI is turned on; it is off now){% endif %}</label>
+        </div>
+      </div>
+      <p class="st-hint">Targets per account must add up to 100%. Funds you hold that aren't listed count as a 0% target. Tick “Scan only” for an account you want checked for tax-loss harvesting and wash-sale conflicts without targets.</p>
+
+      <div id="st-accounts">
+        {% for a in cfg.accounts %}
+        {% set idx = loop.index0 %}
+        <div class="st-account{% if a.scan_only %} scan{% endif %}" data-idx="{{ idx }}">
+          <input type="hidden" name="acct_index" value="{{ idx }}">
+          <div class="st-account-head">
+            <div class="form-group">
+              <label>Account</label>
+              <select name="acct-{{ idx }}-account_id">
+                {% for ia in investment_accounts %}
+                <option value="{{ ia._id }}"{% if ia._id == (a.account_id|string) %} selected{% endif %}>{{ ia.name }} ({{ ia.account_type }})</option>
+                {% endfor %}
+              </select>
+            </div>
+            <label class="st-check"><input type="checkbox" name="acct-{{ idx }}-taxable" value="1"{% if a.taxable %} checked{% endif %}> Taxable</label>
+            <label class="st-check"><input type="checkbox" class="st-scan" name="acct-{{ idx }}-scan_only" value="1"{% if a.scan_only %} checked{% endif %}> Scan only</label>
+            <span class="st-sum"></span>
+            <button type="button" class="st-btn st-remove-account">Remove account</button>
+          </div>
+          <div class="st-targets">
+            {% for sym, pct in (a.targets or {}).items() %}
+            <div class="st-target-row">
+              <input type="text" name="acct-{{ idx }}-symbol" value="{{ sym }}" placeholder="VTI" maxlength="10">
+              <input type="number" name="acct-{{ idx }}-pct" value="{{ pct }}" step="0.1" min="0" max="100" placeholder="%">
+              <button type="button" class="st-btn st-remove-row" aria-label="Remove fund">&times;</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="st-btn st-add-row">+ Add fund</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% if investment_accounts %}
+      <button type="button" class="st-btn" id="st-add-account">+ Add account</button>
+      {% else %}
+      <p class="st-hint">No investment accounts yet — add one on the Accounts page first.</p>
+      {% endif %}
+    </fieldset>
+
+    <fieldset data-type="report">
+      <legend>Advisor report</legend>
+      {% if not ai_report_enabled %}
+      <p class="st-hint" style="color:#92400e;">Advisor reports need AI, which is turned off. You can save this task, but it is skipped (and says so) until you turn AI on under <a href="{{ url_for('ai_settings_page') }}">AI settings</a>.</p>
+      {% endif %}
+      <div class="form-group">
+        <label for="st-report-type">Report</label>
+        <select id="st-report-type" name="report_type">
+          {% for key, label in report_types.items() %}
+          <option value="{{ key }}"{% if cfg.report_type == key %} selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </fieldset>
+
+    <fieldset data-type="reminder">
+      <legend>Reminder</legend>
+      <div class="form-row">
+        <div class="form-group wide">
+          <label for="st-message">Message</label>
+          <textarea id="st-message" name="message">{{ cfg.message or '' }}</textarea>
+        </div>
+        <div class="form-group wide">
+          <label for="st-checklist">Checklist <span class="st-sub">(one item per line)</span></label>
+          <textarea id="st-checklist" name="checklist">{{ cfg.checklist_text or '' }}</textarea>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Notes</legend>
+      <textarea name="notes" style="width:100%;">{{ ft.notes or '' }}</textarea>
+    </fieldset>
+
+    <div class="st-form-actions">
+      <button type="submit" class="st-btn primary">{{ 'Save changes' if editing else 'Create task' }}</button>
+      {% if editing %}<a class="st-btn" href="{{ url_for('scheduled_tasks_page') }}">Cancel</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+<template id="st-account-tpl">
+  <div class="st-account" data-idx="__N__">
+    <input type="hidden" name="acct_index" value="__N__">
+    <div class="st-account-head">
+      <div class="form-group">
+        <label>Account</label>
+        <select name="acct-__N__-account_id">
+          {% for ia in investment_accounts %}
+          <option value="{{ ia._id }}">{{ ia.name }} ({{ ia.account_type }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <label class="st-check"><input type="checkbox" name="acct-__N__-taxable" value="1"> Taxable</label>
+      <label class="st-check"><input type="checkbox" class="st-scan" name="acct-__N__-scan_only" value="1"> Scan only</label>
+      <span class="st-sum"></span>
+      <button type="button" class="st-btn st-remove-account">Remove account</button>
+    </div>
+    <div class="st-targets"></div>
+    <button type="button" class="st-btn st-add-row">+ Add fund</button>
+  </div>
+</template>
+<template id="st-row-tpl">
+  <div class="st-target-row">
+    <input type="text" name="acct-__N__-symbol" placeholder="VTI" maxlength="10">
+    <input type="number" name="acct-__N__-pct" step="0.1" min="0" max="100" placeholder="%">
+    <button type="button" class="st-btn st-remove-row" aria-label="Remove fund">&times;</button>
+  </div>
+</template>
+
+<script>
+(function () {
+  var form = document.getElementById('st-form');
+  var typeSel = document.getElementById('st-type');
+  var freqSel = document.getElementById('st-frequency');
+  var accounts = document.getElementById('st-accounts');
+  var nextIdx = accounts.querySelectorAll('.st-account').length;
+
+  function showType() {
+    form.querySelectorAll('fieldset[data-type]').forEach(function (fs) {
+      var on = fs.dataset.type === typeSel.value;
+      fs.hidden = !on;
+      fs.disabled = !on;  // hidden sections don't submit
+    });
+  }
+  function showFreq() {
+    form.querySelectorAll('[data-freq]').forEach(function (el) {
+      el.hidden = el.dataset.freq.split(' ').indexOf(freqSel.value) === -1;
+    });
+  }
+  function updateSum(acct) {
+    var out = acct.querySelector('.st-sum');
+    var scan = acct.querySelector('.st-scan').checked;
+    acct.classList.toggle('scan', scan);
+    if (scan) { out.textContent = 'TLH scan only'; out.className = 'st-sum'; return; }
+    var total = 0;
+    acct.querySelectorAll('input[name$="-pct"]').forEach(function (i) { total += parseFloat(i.value) || 0; });
+    out.textContent = 'Total ' + (Math.round(total * 10) / 10) + '%';
+    out.className = 'st-sum ' + (Math.abs(total - 100) <= 0.5 ? 'good' : 'bad');
+  }
+  function addRow(acct) {
+    var html = document.getElementById('st-row-tpl').innerHTML.replace(/__N__/g, acct.dataset.idx);
+    acct.querySelector('.st-targets').insertAdjacentHTML('beforeend', html);
+  }
+  var addBtn = document.getElementById('st-add-account');
+  if (addBtn) addBtn.addEventListener('click', function () {
+    var html = document.getElementById('st-account-tpl').innerHTML.replace(/__N__/g, nextIdx++);
+    accounts.insertAdjacentHTML('beforeend', html);
+    var acct = accounts.lastElementChild;
+    addRow(acct); addRow(acct);
+    updateSum(acct);
+  });
+  accounts.addEventListener('click', function (e) {
+    var acct = e.target.closest('.st-account');
+    if (!acct) return;
+    if (e.target.classList.contains('st-add-row')) { addRow(acct); }
+    else if (e.target.classList.contains('st-remove-row')) { e.target.closest('.st-target-row').remove(); }
+    else if (e.target.classList.contains('st-remove-account')) { acct.remove(); return; }
+    updateSum(acct);
+  });
+  accounts.addEventListener('input', function (e) {
+    var acct = e.target.closest('.st-account');
+    if (acct) updateSum(acct);
+  });
+  accounts.addEventListener('change', function (e) {
+    var acct = e.target.closest('.st-account');
+    if (acct) updateSum(acct);
+  });
+  typeSel.addEventListener('change', showType);
+  freqSel.addEventListener('change', showFreq);
+  accounts.querySelectorAll('.st-account').forEach(updateSum);
+  showType(); showFreq();
+})();
+</script>
+{% endblock %}

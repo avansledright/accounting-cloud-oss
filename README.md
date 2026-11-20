@@ -144,6 +144,13 @@ data set (`scripts/seed_demo.py`)._
 - **Portfolio**: holdings with live prices and dividend history from Yahoo
   Finance (Alpha Vantage fallback), brokerage CSV import, dividend income,
   and trailing returns that feed projections. [docs](docs/portfolio.md)
+- **Price alerts**: get told when a stock passes a gain over your cost, a
+  target price or a daily jump; shown in the app, and optionally posted to
+  Slack. [docs](docs/price-alerts.md)
+- **Scheduled tasks**: rebalance checks against your target weights (with
+  the trades back to target and tax-loss-harvest candidates), reminders and
+  extra advisor reports, run on a schedule with every result saved. No AI
+  needed for the first two. [docs](docs/scheduled-tasks.md)
 - **Investment projections**: monthly compounding with each account's
   expected return plus its recurring contributions, 5 to 30 year horizons, and
   a 24-month net worth projection.
@@ -165,7 +172,7 @@ data set (`scripts/seed_demo.py`)._
 - **Analytics, calendar and history** views of spending and upcoming bills.
 - **Household payroll**: wages and taxes for a household employee, W-2,
   Schedule H and SSA EFW2 export with a local validator.
-- **MCP server** (optional): about 70 read and write tools over stateless streamable
+- **MCP server** (optional): about 90 read and write tools over stateless streamable
   HTTP with bearer-token auth, for Claude and other MCP clients.
   [docs](docs/mcp-server.md)
 - **AI extras** (optional, off by default): weekly, monthly and portfolio
@@ -247,7 +254,7 @@ are optional except `SECRET_KEY`, which you should always set.
 | `APPLICATION_ROOT` | `/` | Sub-path when served behind a proxy, e.g. `/accounting`. A proxy can send `X-Script-Name` instead. |
 | `STARTING_BALANCE` | `0` | Ledger balance used only until the first account exists. |
 | `FLASK_DEBUG` | `false` | Debug mode for `python app.py`. Never in production. |
-| `TZ` | `UTC` | Time zone for schedules (17:00 price refresh, 06:00 reports) and for "today". |
+| `TZ` | `UTC` | Time zone for schedules (17:00 price refresh, 06:00 reports, scheduled tasks) and for "today". |
 | `CC_STATEMENT_DIR` | `./data/cc_statements` | Where uploaded statement CSVs are kept. |
 | `ESCROW_PROPERTY_TAX_MONTHS` | `6,12` | Months the escrow simulation pays property tax. |
 | `ESCROW_INSURANCE_MONTH` | `1` | Month the escrow simulation pays homeowner's insurance. |
@@ -263,6 +270,10 @@ are optional except `SECRET_KEY`, which you should always set.
 | `AGENT_OLLAMA_API_KEY` | empty | Bearer token for the advisor endpoint. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | Seconds to wait for a report. |
 | `ADVISOR_PROFILE_FILE` | empty | Path to your household profile ([example](agent/household_profile.example.md)). |
+| `SLACK_BOT_TOKEN` | empty | Optional Slack bot token (`chat:write`) for [price alerts](docs/price-alerts.md). Empty: alerts are only shown in the app. |
+| `SLACK_CHANNEL` | empty | Slack channel for price alerts, e.g. `#your-channel`. Needed together with the token. |
+| `PRICE_ALERT_POLL_SECONDS` | `300` | Seconds between price-alert checks (US market hours). |
+| `SCHEDULED_TASKS_POLL_SECONDS` | `300` | Seconds between checks for due [scheduled tasks](docs/scheduled-tasks.md). |
 | `MCP_API_TOKEN` | empty | Required by the MCP server; it refuses every request until set. |
 | `MCP_HOST` | `0.0.0.0` | MCP bind address. |
 | `MCP_PORT` | `8765` | MCP port (also the Compose host port). |
@@ -310,6 +321,8 @@ Details: [docs/architecture.md](docs/architecture.md).
 | Budget system | [docs/budget.md](docs/budget.md) |
 | Ledger projection engine | [docs/ledger-projections.md](docs/ledger-projections.md) |
 | Portfolio, prices and investment projections | [docs/portfolio.md](docs/portfolio.md) |
+| Price alerts (and optional Slack) | [docs/price-alerts.md](docs/price-alerts.md) |
+| Scheduled tasks: rebalance checks, reminders, reports | [docs/scheduled-tasks.md](docs/scheduled-tasks.md) |
 | Benefits and card perks | [docs/benefits.md](docs/benefits.md) |
 | Credit card import and categorization | [docs/credit-cards.md](docs/credit-cards.md) |
 | Home-move / mortgage planner | [docs/home-move.md](docs/home-move.md) |

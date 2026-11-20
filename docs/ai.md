@@ -138,7 +138,7 @@ service you chose:
 |---|---|
 | Sorting purchases | One merchant name from a card transaction (e.g. `JOES CAFE`, with processor prefixes and store numbers stripped) and the category list. No amounts, dates or account details. Two requests per merchant: the category is only used when both answers agree. |
 | Spending tips | Card spending totals by category per month, and the top 20 merchants by total with counts. |
-| Advisor reports | A summary of your finances: account balances, budget and spending by category, recurring bills and income, debts, investments, net worth history, and the household profile if you configured one (`ADVISOR_PROFILE_FILE`). No account numbers or passwords. |
+| Advisor reports | A summary of your finances: account balances, budget and spending by category, recurring bills and income, debts, investments, net worth history, and the household profile if you configured one (`ADVISOR_PROFILE_FILE`). No account numbers or passwords. A [scheduled](scheduled-tasks.md) rebalance check with "Add a short AI summary" ticked also sends that check's result: account names, fund symbols, values, weights and suggested trades. |
 
 The settings page asks you to confirm this for each cloud service before it
 saves.
@@ -226,6 +226,11 @@ Background failures (categorization, tips, reports) are logged with
 - The report scheduler thread always runs and checks
   `ai.scheduled_reports_enabled()` at each wake-up (Mondays and the 1st,
   06:00, plus a catch-up at startup).
+- [Scheduled tasks](scheduled-tasks.md) follow the same switch: an
+  advisor-report task is skipped with a message while `ai.enabled('report')`
+  is false, and a rebalance check's optional commentary is requested with
+  `ai.generate('report', ...)` only when it is true. Rebalance checks,
+  reminders and [price alerts](price-alerts.md) never use AI.
 - Tests (`tests/test_ai_settings.py`, `tests/test_ai_optional.py`) mock every
   provider; CI never calls a real one.
 - To add a provider: add it to `PROVIDERS` (models with prices, defaults, key

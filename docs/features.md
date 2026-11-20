@@ -12,6 +12,8 @@ their own deep-dive docs and are only summarised here:
 | Tax year contribution room and card perks (`/benefits`) | [benefits.md](benefits.md) |
 | Home move planner (`/tools/home-move`) | [home-move.md](home-move.md) |
 | Advisor reports | [advisor-agent.md](advisor-agent.md) |
+| Scheduled tasks (`/scheduled-tasks`) | [scheduled-tasks.md](scheduled-tasks.md) |
+| Price alerts (on `/portfolio`) | [price-alerts.md](price-alerts.md) |
 | MCP server | [mcp-server.md](mcp-server.md) |
 
 All routes live in `app.py`. Page routes render a Jinja template from
@@ -602,6 +604,36 @@ portfolio review, a history of past reports (`/reports/<id>`), and a
 the background and polls `GET /api/reports/status` until it finishes. How
 reports are built, scheduled and configured is in
 [advisor-agent.md](advisor-agent.md).
+
+The page also has a **Scheduled Task Results** card with the five latest
+runs, and scheduled results appear in the history list under the task's
+name. Opening one from the history goes to its own view
+(`/scheduled-tasks/results/<id>`).
+
+## Scheduled tasks (`/scheduled-tasks`)
+
+Chores the app runs on a schedule (weekly, monthly, quarterly, yearly or
+once) and keeps the results of:
+
+- a **rebalance check**: each account's holdings against your target
+  weights, the trades that bring it back, and for taxable accounts
+  tax-loss-harvest candidates with wash-sale warnings;
+- a **reminder** with a checklist;
+- an **advisor report** on your own schedule.
+
+The page lists each task with its schedule in plain words, the next and last
+run and its status, and has Run now, Enable/Disable, Edit and Delete. Rebalance
+checks and reminders need no AI. An advisor-report task is skipped, with the
+reason shown, while AI is off. Details, the schedule rules and the data model
+are in [scheduled-tasks.md](scheduled-tasks.md).
+
+## Price alerts (on `/portfolio`)
+
+A section of the Portfolio page: watch a symbol for a gain over your cost per
+share (a ladder of steps, each firing once), a target price or a daily jump.
+Alerts are checked every five minutes in US market hours and listed under
+**Recent alerts**; **Check now** checks immediately. Posting them to Slack is
+optional. See [price-alerts.md](price-alerts.md).
 
 ## Health check
 

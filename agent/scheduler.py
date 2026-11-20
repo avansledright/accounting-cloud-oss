@@ -57,6 +57,8 @@ def schedule_reports():
     so a fresh install without AI doesn't fill the reports collection with
     insight-less entries. The setting is checked at each wake-up, so turning
     it on or off takes effect without a restart.
+
+    Also starts the scheduled-task and price-alert polling loops.
     """
 
     def report_loop():
@@ -103,3 +105,14 @@ def schedule_reports():
     t = threading.Thread(target=report_loop, daemon=True)
     t.start()
     logger.info("Report scheduler started")
+
+    # Neither of these needs AI, so they start whether or not it is turned on.
+    # User-configurable tasks (db.scheduled_tasks) poll on their own thread;
+    # its first pass is the startup catch-up. See agent/scheduled_tasks.py.
+    from agent import scheduled_tasks
+    scheduled_tasks.start_task_loop()
+
+    # Price alerts (db.price_alerts) are checked every few minutes in market
+    # hours. See agent/price_alerts.py.
+    from agent import price_alerts
+    price_alerts.start_alert_loop()

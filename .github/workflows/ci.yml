@@ -79,14 +79,14 @@ jobs:
           # A fresh install sends the dashboard to the setup wizard.
           loc=$(curl -s -o /dev/null -w '%{redirect_url}' http://127.0.0.1:5052/)
           echo "/ -> $loc"; case "$loc" in */setup/welcome) ;; *) exit 1 ;; esac
-          for p in /setup/welcome /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /tools/home-move /analytics /calendar /reports /admin /payroll /transfers; do
+          for p in /setup/welcome /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /tools/home-move /analytics /calendar /reports /scheduled-tasks /admin /payroll /transfers; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5052$p")
             echo "$code $p"; [ "$code" = 200 ]
           done
       - name: Seed demo data and re-check pages
         run: |
           docker compose exec -T web python scripts/seed_demo.py
-          for p in / /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /analytics; do
+          for p in / /ledger /budget /accounts /credit-cards /portfolio /networth /debts /goals /benefits /analytics /scheduled-tasks /reports; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:5052$p")
             echo "$code $p"; [ "$code" = 200 ]
           done

@@ -340,7 +340,7 @@ All configuration is through environment variables (in Docker Compose, the
 | `APPLICATION_ROOT` | `/` | web | Sub-path prefix behind a proxy (alternative: `X-Script-Name` header). |
 | `STARTING_BALANCE` | `0` | web | Ledger balance used only until the first account exists. |
 | `FLASK_DEBUG` | `false` | web | Debug mode when running `python app.py`. Never in production. |
-| `TZ` | `UTC` | web, mcp | Time zone for schedules (17:00 price refresh, report scheduler) and for "today" in projections. The image installs `tzdata` and sets `ENV TZ=UTC`, so any IANA zone works (for example `TZ=America/New_York`); without the zoneinfo database a non-UTC value would silently fall back to UTC. `deploy/kubernetes/configmap.yaml` has a commented `TZ` example. |
+| `TZ` | `UTC` | web, mcp | Time zone for schedules (17:00 price refresh, report scheduler, scheduled tasks) and for "today" in projections. The image installs `tzdata` and sets `ENV TZ=UTC`, so any IANA zone works (for example `TZ=America/New_York`); without the zoneinfo database a non-UTC value would silently fall back to UTC. `deploy/kubernetes/configmap.yaml` has a commented `TZ` example. |
 | `CC_STATEMENT_DIR` | `./data/cc_statements` | web | Where raw statement CSVs are stored. |
 | `ESCROW_PROPERTY_TAX_MONTHS` | `6,12` | web | Months the escrow simulation pays property tax (annual bill split evenly). |
 | `ESCROW_INSURANCE_MONTH` | `1` | web | Month the escrow simulation pays homeowner's insurance. |
@@ -356,6 +356,10 @@ All configuration is through environment variables (in Docker Compose, the
 | `AGENT_OLLAMA_API_KEY` | empty | web, mcp | Optional bearer token for that endpoint. |
 | `AGENT_OLLAMA_TIMEOUT` | `3600` | web, mcp | Seconds to wait for a report. |
 | `ADVISOR_PROFILE_FILE` | empty | web, mcp | Path to your household profile Markdown. |
+| `SLACK_BOT_TOKEN` | empty | web | Optional Slack bot token (`chat:write` scope) for [price alerts](price-alerts.md). With it or `SLACK_CHANNEL` empty, alerts are recorded in the app and nothing is sent. |
+| `SLACK_CHANNEL` | empty | web | Slack channel price alerts are posted to (name or ID). The bot must be a member. |
+| `PRICE_ALERT_POLL_SECONDS` | `300` | web | Seconds between price-alert checks (regular US market hours only). |
+| `SCHEDULED_TASKS_POLL_SECONDS` | `300` | web | Seconds between checks for due [scheduled tasks](scheduled-tasks.md). |
 | `MCP_API_TOKEN` | empty (refuses all) | mcp | Bearer token required by the MCP server. |
 | `MCP_HOST` | `0.0.0.0` | mcp | Bind address. |
 | `MCP_PORT` | `8765` | mcp | Port (Compose also uses it for the host port). |
