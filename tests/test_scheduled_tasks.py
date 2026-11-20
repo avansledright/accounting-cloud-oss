@@ -45,18 +45,18 @@ def _hold(db, account_id, symbol, qty, cost=None):
                             'cost_basis': cost, 'date_added': datetime(2025, 1, 1)})
 
 
-def _rebalance_task(db, accounts, now=datetime(2026, 10, 1), **cfg):
+def _rebalance_task(db, accounts, now=datetime(2026, 3, 1), **cfg):
     tid, err = S.create_task({
         'name': 'Yearly rebalance check', 'task_type': 'rebalance_check',
-        'schedule': {'frequency': 'yearly', 'month': 10, 'day': 15, 'hour': 8},
+        'schedule': {'frequency': 'yearly', 'month': 3, 'day': 10, 'hour': 8},
         'config': {'accounts': accounts, **cfg},
     }, now=now)
     assert err is None, err
     return tid
 
 
-def _reminder_task(db, now=datetime(2026, 10, 1), **sched):
-    sched = sched or {'frequency': 'yearly', 'month': 10, 'day': 15, 'hour': 8}
+def _reminder_task(db, now=datetime(2026, 3, 1), **sched):
+    sched = sched or {'frequency': 'yearly', 'month': 3, 'day': 10, 'hour': 8}
     tid, err = S.create_task({'name': 'Review insurance cover', 'task_type': 'reminder',
                               'schedule': sched,
                               'config': {'message': 'Yearly review', 'checklist': ['Home', 'Car']}},
@@ -66,18 +66,18 @@ def _reminder_task(db, now=datetime(2026, 10, 1), **sched):
 
 
 # ---------------------------------------------------------------- compute_next_run
-YEARLY_OCT15 = {'frequency': 'yearly', 'month': 10, 'day': 15, 'hour': 8}
+YEARLY_MAR10 = {'frequency': 'yearly', 'month': 3, 'day': 10, 'hour': 8}
 
 
 @pytest.mark.parametrize('after, expected', [
-    (datetime(2026, 10, 19, 12), datetime(2027, 10, 15, 8)),   # already passed → next year
-    (datetime(2026, 10, 15, 7, 59), datetime(2026, 10, 15, 8)),
-    (datetime(2026, 10, 15, 8), datetime(2027, 10, 15, 8)),     # strictly after
-    (datetime(2026, 12, 31, 23), datetime(2027, 10, 15, 8)),    # year rollover
-    (datetime(2026, 1, 1), datetime(2026, 10, 15, 8)),
+    (datetime(2026, 3, 19, 12), datetime(2027, 3, 10, 8)),   # already passed → next year
+    (datetime(2026, 3, 10, 7, 59), datetime(2026, 3, 10, 8)),
+    (datetime(2026, 3, 10, 8), datetime(2027, 3, 10, 8)),     # strictly after
+    (datetime(2026, 12, 31, 23), datetime(2027, 3, 10, 8)),    # year rollover
+    (datetime(2026, 1, 1), datetime(2026, 3, 10, 8)),
 ])
 def test_yearly(after, expected):
-    assert S.compute_next_run(YEARLY_OCT15, after) == expected
+    assert S.compute_next_run(YEARLY_MAR10, after) == expected
 
 
 def test_yearly_feb_29_clamps_in_non_leap_years():
@@ -123,7 +123,7 @@ def test_hour_zero_is_midnight_not_default():
 
 
 def test_describe_schedule():
-    assert S.describe_schedule(YEARLY_OCT15) == 'Every year on Oct 15 at 8am'
+    assert S.describe_schedule(YEARLY_MAR10) == 'Every year on Mar 10 at 8am'
     assert S.describe_schedule({'frequency': 'weekly', 'weekday': 0, 'hour': 18}) == \
         'Every week on Monday at 6pm'
     assert 'Feb, May, Aug, Nov' in S.describe_schedule(
@@ -147,17 +147,17 @@ def test_normalize_schedule_validation():
 # ---------------------------------------------------------------- claim / catch-up / loop
 def test_atomic_claim_prevents_double_run(db, prices):
     tid = _reminder_task(db)
-    now = datetime(2026, 10, 15, 8, 5)
+    now = datetime(2026, 3, 10, 8, 5)
     snapshot = db.scheduled_tasks.find_one({'_id': ObjectId(tid)})  # both replicas read this
     first = S.claim_task(snapshot, now)
     second = S.claim_task(snapshot, now)
     assert first is not None and second is None
-    assert first['next_run'] == datetime(2027, 10, 15, 8)
+    assert first['next_run'] == datetime(2027, 3, 10, 8)
 
 
 def test_run_due_tasks_twice_runs_once(db, prices):
     _reminder_task(db)
-    now = datetime(2026, 10, 15, 8, 5)
+    now = datetime(2026, 3, 10, 8, 5)
     assert S.run_due_tasks(now) == 1
     assert S.run_due_tasks(now) == 0
     assert db.reports.count_documents({'type': 'scheduled'}) == 1
@@ -166,12 +166,12 @@ def test_run_due_tasks_twice_runs_once(db, prices):
 def test_catch_up_runs_once_then_advances_to_future(db, prices):
     tid = _reminder_task(db)
     db.scheduled_tasks.update_one({'_id': ObjectId(tid)},
-                                  {'$set': {'next_run': datetime(2024, 10, 15, 8)}})  # 2 missed
+                                  {'$set': {'next_run': datetime(2024, 3, 10, 8)}})  # 2 missed
     now = datetime(2026, 10, 19, 9)
     assert S.run_due_tasks(now) == 1
     assert S.run_due_tasks(now) == 0
     t = db.scheduled_tasks.find_one({'_id': ObjectId(tid)})
-    assert t['next_run'] == datetime(2027, 10, 15, 8)
+    assert t['next_run'] == datetime(2027, 3, 10, 8)
     assert t['last_status'] == 'ok' and t['last_run'] == now and t['running_since'] is None
     rep = db.reports.find_one({'_id': t['last_report_id']})
     assert rep['type'] == 'scheduled' and rep['task_id'] == t['_id']
@@ -196,11 +196,11 @@ def test_failing_task_records_error_and_others_still_run(db, prices, monkeypatch
     _hold(db, roth, 'VXUS', 30, 2500)
     prices.update(VTI=100.0, VXUS=100.0)
     good = _rebalance_task(db, [{'account_id': str(roth), 'targets': {'VTI': 70, 'VXUS': 30}}])
-    assert S.run_due_tasks(datetime(2026, 10, 15, 9)) == 2
+    assert S.run_due_tasks(datetime(2026, 3, 10, 9)) == 2
     b = db.scheduled_tasks.find_one({'_id': ObjectId(bad)})
     g = db.scheduled_tasks.find_one({'_id': ObjectId(good)})
     assert b['last_status'] == 'error' and 'kaboom' in b['last_error']
-    assert b['next_run'] == datetime(2027, 10, 15, 8)  # still advanced — no retry storm
+    assert b['next_run'] == datetime(2027, 3, 10, 8)  # still advanced — no retry storm
     assert g['last_status'] == 'ok'
 
 
@@ -222,7 +222,7 @@ def test_loop_survives_exceptions(monkeypatch):
 def test_disabled_tasks_are_skipped(db, prices):
     tid = _reminder_task(db)
     assert S.set_enabled(tid, False) is None
-    assert S.run_due_tasks(datetime(2026, 10, 15, 9)) == 0
+    assert S.run_due_tasks(datetime(2026, 3, 10, 9)) == 0
 
 
 # ---------------------------------------------------------------- rebalance math
@@ -236,7 +236,7 @@ def _roth(db, vti_qty, vxus_qty, prices):
 
 def _run(db, accounts, **cfg):
     tid = _rebalance_task(db, accounts, **cfg)
-    rep = S.execute_task(S.get_task(tid), now=datetime(2026, 10, 15, 8))
+    rep = S.execute_task(S.get_task(tid), now=datetime(2026, 3, 10, 8))
     assert rep is not None
     return rep
 
@@ -453,12 +453,12 @@ def test_report_task_runs_generator(db, monkeypatch, ai_on):
 def test_targets_must_sum_to_100(db, prices):
     roth = _acct(db, 'Test Roth', 'roth_ira')
     _, err = S.create_task({'name': 'x', 'task_type': 'rebalance_check',
-                            'schedule': YEARLY_OCT15,
+                            'schedule': YEARLY_MAR10,
                             'config': {'accounts': [{'account_id': str(roth),
                                                      'targets': {'VTI': 70, 'VXUS': 25}}]}})
     assert err and '95' in err
     _, err = S.create_task({'name': 'x', 'task_type': 'rebalance_check',
-                            'schedule': YEARLY_OCT15,
+                            'schedule': YEARLY_MAR10,
                             'config': {'accounts': [{'account_id': str(roth),
                                                      'targets': {'VTI': 70.3, 'VXUS': 30}}]}})
     assert err is None   # within ±0.5
@@ -466,7 +466,7 @@ def test_targets_must_sum_to_100(db, prices):
 
 def test_rejects_non_investment_account(db):
     chk = _acct(db, 'Checking', 'checking')
-    _, err = S.create_task({'name': 'x', 'task_type': 'rebalance_check', 'schedule': YEARLY_OCT15,
+    _, err = S.create_task({'name': 'x', 'task_type': 'rebalance_check', 'schedule': YEARLY_MAR10,
                             'config': {'accounts': [{'account_id': str(chk),
                                                      'targets': {'VTI': 100}}]}})
     assert err and 'not an investment account' in err
@@ -492,10 +492,10 @@ def test_mcp_round_trip(mcp_mod, db, prices):
         {'account_id': str(brokerage), 'targets': {}, 'taxable': True, 'scan_only': True}]}
 
     out = mcp_mod.add_scheduled_task('Yearly rebalance check', 'rebalance_check',
-                                     'yearly', month=10, day=15, hour=8,
+                                     'yearly', month=3, day=10, hour=8,
                                      config_json=json.dumps(cfg))
     assert out.startswith('Created scheduled task'), out
-    assert 'Every year on Oct 15 at 8am' in out
+    assert 'Every year on Mar 10 at 8am' in out
     tid = str(db.scheduled_tasks.find_one()['_id'])
 
     listing = mcp_mod.list_scheduled_tasks()
@@ -504,7 +504,7 @@ def test_mcp_round_trip(mcp_mod, db, prices):
     out = mcp_mod.update_scheduled_task(tid, day=16, config_json='{"drift_threshold_pct": 4}')
     assert out.startswith('Updated'), out
     t = db.scheduled_tasks.find_one()
-    assert t['schedule']['day'] == 16 and t['schedule']['month'] == 10
+    assert t['schedule']['day'] == 16 and t['schedule']['month'] == 3
     assert t['config']['drift_threshold_pct'] == 4 and len(t['config']['accounts']) == 2
 
     assert 'disabled' in mcp_mod.update_scheduled_task(tid, enabled='false')
@@ -550,7 +550,7 @@ def test_demo_data_tasks_and_alert_are_valid_and_run(db, prices):
 
 
 def test_mcp_validation_returns_friendly_errors(mcp_mod, db):
-    assert mcp_mod.add_scheduled_task('x', 'nope', 'yearly', month=10, day=15).startswith('Error')
+    assert mcp_mod.add_scheduled_task('x', 'nope', 'yearly', month=3, day=10).startswith('Error')
     assert mcp_mod.add_scheduled_task('x', 'reminder', 'yearly', month=13, day=1,
                                       config_json='{"message": "hi"}').startswith('Error')
     assert 'JSON' in mcp_mod.add_scheduled_task('x', 'reminder', 'yearly', month=1, day=1,
@@ -576,7 +576,7 @@ def test_page_renders_populated_and_detail(client, db, prices):
     resp = client.get('/scheduled-tasks')
     assert resp.status_code == 200
     assert b'Yearly rebalance check' in resp.data
-    assert b'Every year on Oct 15 at 8am' in resp.data
+    assert b'Every year on Mar 10 at 8am' in resp.data
     assert client.get(f'/scheduled-tasks?edit={tid}').status_code == 200
     detail = client.get(f'/scheduled-tasks/{tid}')
     assert detail.status_code == 200

@@ -216,7 +216,7 @@ def compute_next_run(schedule, after):
 
 
 def describe_schedule(schedule):
-    """Plain-English schedule, e.g. 'Every year on Oct 15 at 8am'."""
+    """Plain-English schedule, e.g. 'Every year on Mar 10 at 8am'."""
     if not schedule:
         return 'No schedule'
     freq = schedule.get('frequency')
